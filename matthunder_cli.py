@@ -47,6 +47,9 @@ SCAN_MAP = {
     "deep": ("dps", dark_deep_target, "target"),
     "takeover": ("tov", None, "list_or_target"),
     "sensitive": ("sens", find_sensitive_data, "target"),
+    "blh": ("blh", None, "target"),
+    "bac": ("bac", None, "target"),
+    "cred": ("cred", None, "target"),
 }
 
 SPEED_ALIAS = {"1": "low", "2": "standard", "3": "fast"}
@@ -117,6 +120,18 @@ def run_scan(scan: str, target: str = None, speed: str = "standard",
             return "[!] Sensitive scan butuh target"
         find_sensitive_data(target)
         return f"[OK] Sensitive scan selesai: {target}"
+    if scan in ("blh", "bac", "cred"):
+        if not target:
+            return "[!] %s scan butuh target" % scan.upper()
+        from scanners import SCANNER_REGISTRY
+        runner = SCANNER_REGISTRY.get(scan)
+        if not runner:
+            return f"[!] Scanner module {scan} tidak tersedia"
+        try:
+            result = runner(target, [])
+        except Exception as e:
+            return f"[!] {scan} error: {e}"
+        return f"[OK] {scan.upper()} scan selesai: {result.get('links_checked', result.get('links_found', 0))} links (db: matthunder_scans.db, scan_id: {result.get('scan_id')})"
     return f"[!] Scan tidak dikenal: {scan}"
 
 
@@ -136,6 +151,18 @@ def interactive_menu():
             t = _normalize_target(input("Target (example.com): ").strip())
             if t:
                 find_sensitive_data(t)
+        elif choice == "6":
+            t = _normalize_target(input("Target (example.com): ").strip())
+            if t:
+                run_scan("blh", target=t)
+        elif choice == "7":
+            t = _normalize_target(input("Target (example.com): ").strip())
+            if t:
+                run_scan("bac", target=t)
+        elif choice == "8":
+            t = _normalize_target(input("Target (example.com): ").strip())
+            if t:
+                run_scan("cred", target=t)
         elif choice == "9":
             from matthunder import setup_menu
             setup_menu()
@@ -198,7 +225,7 @@ def main():
         prog="matthunder",
         description="matthunder CLI — recon automation with optional AI parser (BYOK)",
     )
-    p.add_argument("scan", nargs="?", help="light | dark | deep | takeover | sensitive")
+    p.add_argument("scan", nargs="?", help="light | dark | deep | takeover | sensitive | blh | bac | cred")
     p.add_argument("target", nargs="?", help="Target domain")
     p.add_argument("speed", nargs="?", default="standard", help="low | standard | fast (or 1/2/3)")
     p.add_argument("-l", "--list", help="Subdomain list file (for takeover mass)")
@@ -265,6 +292,12 @@ def main():
         scan = "tov"
     elif scan in ("sensitive", "sens"):
         scan = "sens"
+    elif scan in ("blh", "broken"):
+        scan = "blh"
+    elif scan in ("bac", "collab"):
+        scan = "bac"
+    elif scan in ("cred", "credentials", "config"):
+        scan = "cred"
     else:
         print(f"[!] Scan tidak dikenal: {scan}")
         sys.exit(1)

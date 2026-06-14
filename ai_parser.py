@@ -11,7 +11,7 @@ except ImportError:
 
 
 ALLOWED_SPEEDS = {"low", "standard", "fast"}
-ALLOWED_SCANS = {"lts", "dks", "dps", "tov", "sens"}
+ALLOWED_SCANS = {"lts", "dks", "dps", "tov", "sens", "blh", "bac", "cred"}
 
 PROVIDERS = {
     "openai": {
@@ -98,6 +98,9 @@ Scan modes (use the code):
 - dps  = Deep Scan
 - tov  = Subdomain Takeover (requires -list)
 - sens = Sensitive Data
+- blh  = Broken Link Hunter (social/profile account check)
+- bac  = Business Asset Collab (3rd-party resource links)
+- cred = Credential/Config URL finder
 
 Speed: low | standard | fast
 
@@ -193,7 +196,21 @@ def heuristic_parse(query: str) -> Optional[dict]:
     """Offline fallback when no API key set. Handles common phrasings."""
     q = query.lower().strip()
     scan = None
-    for code, kw in [("lts", "light"), ("dks", "dark"), ("dps", "deep"), ("tov", "takeover"), ("sens", "sensitive")]:
+    for code, kw in [
+        ("lts", "light"),
+        ("dks", "dark"),
+        ("dps", "deep"),
+        ("tov", "takeover"),
+        ("sens", "sensitive"),
+        ("blh", "broken link"),
+        ("blh", "social"),
+        ("bac", "collab"),
+        ("bac", "sharepoint"),
+        ("bac", "google drive"),
+        ("cred", "credential"),
+        ("cred", "config"),
+        ("cred", "sensitive file"),
+    ]:
         if kw in q:
             scan = code
             break

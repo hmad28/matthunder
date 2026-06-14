@@ -244,13 +244,16 @@ def display_menu():
     print("  [3]  Deep Scan (\033[91mTOP FEATURE\033[0m)")
     print("  [4]  Scan Subdomain Takeover")
     print("  [5]  find Sensitive Data")
+    print("  [6]  Broken Link Hunter (social/profile)")
+    print("  [7]  Business Asset Collab (3rd-party links)")
+    print("  [8]  Credential / Config URLs")
     print("  [9]  Setup Configuration")
     print("  [99] Out ")
     print("  [999] Update Tool")
     print("──────────────────────────────────────────────────────────────────────────────")
     while True:
         choice = input("Choose Feature (0-9, 99, or 999): ").strip()
-        if choice in ["0","1","2","3","4","5","8","9","99","999"]:
+        if choice in ["0","1","2","3","4","5","6","7","8","9","99","999"]:
             return choice
 
         print("[❌] Invalid choice. Enter number 0-9, 99, or 999")
