@@ -754,8 +754,9 @@ def find_sensitive_data(target):
 
     gau_output = os.path.join(OUTPUT_FOLDER_CRAWLED, f"gau_{target}.txt")
     crawling_gau(gau_output, target)
+    if not os.path.exists(gau_output):
+        open(gau_output, "w").close()
     gau_filtered = gau_output + ".tmp"
-    import shutil
     shutil.copy(gau_output, gau_filtered)
     filter_domains_from_base_domain(gau_filtered, target, gau_output)
     os.remove(gau_filtered)
@@ -1237,10 +1238,11 @@ def process_crawling(target, active_file, wayback_output, gau_output, katana_out
     wayback_filtered = wayback_output + ".tmp"
     gau_filtered = gau_output + ".tmp"
     katana_filtered = katana_output + ".tmp"
-    import shutil
-    shutil.copy(wayback_output, wayback_filtered)
-    shutil.copy(gau_output, gau_filtered)
-    shutil.copy(katana_output, katana_filtered)
+    for src, dst in [(wayback_output, wayback_filtered), (gau_output, gau_filtered), (katana_output, katana_filtered)]:
+        if os.path.exists(src):
+            shutil.copy(src, dst)
+        else:
+            open(dst, "w").close()
     filter_domains_from_base_domain(wayback_filtered, target, wayback_output)
     filter_domains_from_base_domain(gau_filtered, target, gau_output)
     filter_domains_from_base_domain(katana_filtered, target, katana_output)
