@@ -2,16 +2,6 @@
 pipeline - Full automated recon→hunt→validate→report pipeline.
 
 Runs ALL available scanners in the correct order.
-Inspired by 5 AI providers + Claude-BugHunter + claude-bug-bounty.
-
-Phases:
-  1. Passive Recon     → subfinder
-  2. Active Recon      → httpx, portscan, waf, tech fingerprint
-  3. Content Discovery → gau, jsanalysis, fuzzer, apirecon, params
-  4. Auto Scanning     → nuclei, gfpatterns, takeover
-  5. Vuln Scanning     → sqli, xss, lfi, cors, ssti, crlf, openredirect
-  6. Intel & Discovery → blh, tpa, cred
-  7. Summary
 
 Usage:
   python matthunder_cli.py pipeline example.com
@@ -66,15 +56,24 @@ def _run_cmd(cmd, timeout=120, label=""):
 
 
 def _run_scanner(scan_key, domain, label):
-    """Run a scanner from the registry and return results."""
+    """Run a scanner from the registry."""
     from scanners import SCANNER_REGISTRY
     runner = SCANNER_REGISTRY.get(scan_key)
     if not runner:
         _log("!", f"{label}: not registered", D)
         return {}
     try:
-        result = runner(domain)
-        return result
+        import inspect
+        sig = inspect.signature(runner)
+        params = list(sig.parameters.keys())
+        # Call with just domain if it accepts it
+        if len(params) == 1:
+            result = runner(domain)
+        elif len(params) == 2 and params[1] in ("platforms", "services", "categories"):
+            result = runner(domain, [])
+        else:
+            result = runner(domain)
+        return result if isinstance(result, dict) else {}
     except Exception as e:
         _log("!", f"{label}: {e}", Y)
         return {}
@@ -93,7 +92,7 @@ def phase1(domain):
         return [domain]
 
     _log("P1", f"subfinder -d {domain} -all")
-    stdout, _, _ = _run_cmd(
+    stdout, stderr, rc = _run_cmd(
         [subfinder, "-d", domain, "-silent", "-all"],
         timeout=180, label="subfinder",
     )
@@ -123,8 +122,12 @@ def phase2(domain, subs):
     live_hosts = _probe_httpx(subs, domain)
 
     # Port scan (top 3)
-    _log("P2", "Port scan on top hosts...")
-    _run_scanner("portscan", live_hosts[0] if live_hosts else domain, "portscan")
+    if live_hosts:
+        _log("P2", "Port scan on top hosts...")
+        _run_scanner("portscan", live_hosts[0], "portscan")
+    else:
+        _log("P2", "Port scan: no live hosts, scanning root domain...")
+        _run_scanner("portscan", domain, "portscan")
 
     # WAF detection
     _log("P2", "WAF detection...")
@@ -141,7 +144,7 @@ def _probe_httpx(subs, domain):
     httpx = _find_bin("httpx")
     if not httpx:
         _log("P2", "httpx not found — run setup.bat", R)
-        return subs[:10]
+        return [domain]
 
     tmp_in = f"_mt_pipe_{domain}_subs.txt"
     tmp_out = f"_mt_pipe_{domain}_live.txt"
@@ -149,57 +152,109 @@ def _probe_httpx(subs, domain):
         f.write("\n".join(subs[:500]))
 
     _log("P2", f"httpx probing {min(len(subs), 500)} subdomains...")
-    _run_cmd(
-        [httpx, "-l", tmp_in, "-silent", "-status-code", "-title",
-         "-o", tmp_out, "-threads", "50", "-timeout", "10", "-retries", "1"],
+
+    # Run httpx with simple flags first
+    stdout, stderr, rc = _run_cmd(
+        [httpx, "-l", tmp_in, "-silent", "-o", tmp_out,
+         "-threads", "50", "-timeout", "10", "-retries", "1"],
         timeout=300, label="httpx",
     )
 
+    # Parse from output file
     live = []
     if os.path.exists(tmp_out):
         with open(tmp_out, encoding="utf-8", errors="ignore") as f:
             for line in f:
-                host = line.strip().split()[0] if line.strip() else ""
+                line = line.strip()
+                if not line:
+                    continue
+                # httpx -silent outputs just URLs like: https://host
+                host = line.split()[0] if line.split() else line
                 host = host.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
                 if host and host not in live:
                     live.append(host)
 
-    # Fallback: probe root domain
-    if not live:
-        _log("P2", "httpx returned 0 — trying root domain...", Y)
-        stdout, _, _ = _run_cmd([httpx, "-u", domain, "-silent"], timeout=30, label="httpx-root")
-        if stdout.strip():
-            host = stdout.strip().split()[0].replace("https://", "").replace("http://", "").split("/")[0]
-            if host:
+    # If file is empty, try parsing stdout
+    if not live and stdout.strip():
+        _log("P2", f"Parsing httpx stdout ({len(stdout.splitlines())} lines)...", D)
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            host = line.split()[0] if line.split() else line
+            host = host.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+            if host and host not in live:
                 live.append(host)
 
-    # Fallback: common subdomains
+    # Fallback 1: probe root domain directly
     if not live:
-        _log("P2", "Trying common subdomains...", Y)
+        _log("P2", "httpx batch returned 0 — probing root domain directly...", Y)
+        stdout2, stderr2, rc2 = _run_cmd(
+            [httpx, "-u", f"https://{domain}", "-silent", "-status-code"],
+            timeout=30, label="httpx-https",
+        )
+        if stdout2.strip():
+            host = stdout2.strip().split()[0].replace("https://", "").replace("http://", "").split("/")[0]
+            if host:
+                live.append(host)
+                _log("P2", f"Found via HTTPS: {host}", G)
+
+        if not live:
+            stdout3, stderr3, rc3 = _run_cmd(
+                [httpx, "-u", f"http://{domain}", "-silent", "-status-code"],
+                timeout=30, label="httpx-http",
+            )
+            if stdout3.strip():
+                host = stdout3.strip().split()[0].replace("https://", "").replace("http://", "").split("/")[0]
+                if host:
+                    live.append(host)
+                    _log("P2", f"Found via HTTP: {host}", G)
+
+    # Fallback 2: try common subdomains
+    if not live:
+        _log("P2", "Probing common subdomains...", Y)
         common = [f"{p}.{domain}" for p in ["www", "api", "mail", "portal", "app", "admin", "dev", "staging", "blog", "cdn", "static", "login", "sso"]]
         tmp_c = f"_mt_pipe_{domain}_common.txt"
         with open(tmp_c, "w") as f:
             f.write("\n".join(common))
-        _run_cmd([httpx, "-l", tmp_c, "-silent", "-o", tmp_out + ".c"], timeout=60, label="httpx-common")
+        stdout4, _, _ = _run_cmd(
+            [httpx, "-l", tmp_c, "-silent", "-o", tmp_out + ".c"],
+            timeout=60, label="httpx-common",
+        )
         if os.path.exists(tmp_out + ".c"):
             with open(tmp_out + ".c") as f:
                 for line in f:
-                    host = line.strip().split()[0].replace("https://", "").replace("http://", "").split("/")[0] if line.strip() else ""
+                    line = line.strip()
+                    if not line:
+                        continue
+                    host = line.split()[0].replace("https://", "").replace("http://", "").split("/")[0]
                     if host and host not in live:
                         live.append(host)
+                        _log("P2", f"Found: {host}", G)
             os.remove(tmp_out + ".c")
-        try: os.remove(tmp_c)
-        except: pass
+        try:
+            os.remove(tmp_c)
+        except OSError:
+            pass
 
+    # Fallback 3: if still nothing, use root domain
+    if not live:
+        _log("P2", "No live hosts found — using root domain as fallback", Y)
+        live = [domain]
+
+    # Cleanup
     for p in [tmp_in, tmp_out]:
-        try: os.remove(p)
-        except: pass
+        try:
+            os.remove(p)
+        except OSError:
+            pass
 
+    # Save live hosts
     live_file = os.path.join("subdomain", f"{domain}_live.txt")
     with open(live_file, "w") as f:
         f.write("\n".join(live))
 
-    _log("P2", f"Live hosts: {len(live)}", G if live else R)
+    _log("P2", f"Live hosts: {len(live)}", G if live and live != [domain] else Y)
     return live
 
 
@@ -215,12 +270,18 @@ def phase3(domain, live_hosts):
     gau = _find_bin("gau")
     urls = set()
     if gau:
-        stdout, _, _ = _run_cmd([gau, "--subs", domain], timeout=120, label="gau")
-        urls = set(l.strip() for l in stdout.splitlines() if l.strip().startswith("http"))
+        stdout, stderr, rc = _run_cmd([gau, "--subs", domain], timeout=300, label="gau")
+        if rc == 0:
+            urls = set(l.strip() for l in stdout.splitlines() if l.strip().startswith("http"))
+        else:
+            _log("P3", f"gau failed (rc={rc}), trying without --subs...", Y)
+            stdout2, _, _ = _run_cmd([gau, domain], timeout=120, label="gau-simple")
+            urls = set(l.strip() for l in stdout2.splitlines() if l.strip().startswith("http"))
     if not urls:
         wayback = _find_bin("waybackurls")
         if wayback:
-            stdout, _, _ = _run_cmd([wayback, domain], timeout=60, label="waybackurls")
+            _log("P3", "Trying waybackurls...")
+            stdout, _, _ = _run_cmd([wayback, domain], timeout=120, label="waybackurls")
             urls = set(l.strip() for l in stdout.splitlines() if l.strip().startswith("http"))
     _log("P3", f"Historical URLs: {len(urls)}", G if urls else Y)
 
@@ -229,16 +290,17 @@ def phase3(domain, live_hosts):
     _run_scanner("jsanalysis", domain, "jsanalysis")
 
     # Directory fuzzing (top 2 live hosts)
-    _log("P3", "Directory fuzzing...")
-    for host in live_hosts[:2]:
-        _run_scanner("fuzzer", host, f"fuzzer:{host}")
+    if live_hosts and live_hosts != [domain]:
+        _log("P3", "Directory fuzzing...")
+        for host in live_hosts[:2]:
+            _run_scanner("fuzzer", host, f"fuzzer:{host}")
 
     # API endpoint recon
-    _log("P3", "API endpoint recon (kiterunner)...")
+    _log("P3", "API endpoint recon...")
     _run_scanner("apirecon", domain, "apirecon")
 
     # Hidden parameter discovery
-    _log("P3", "Hidden parameter discovery (arjun)...")
+    _log("P3", "Hidden parameter discovery...")
     _run_scanner("params", domain, "params")
 
     return list(urls)
@@ -256,26 +318,27 @@ def phase4(domain, live_hosts, urls):
     nuclei = _find_bin("nuclei")
     nuclei_count = 0
     if nuclei and live_hosts:
+        # Use live hosts or root domain
+        targets = live_hosts[:50] if live_hosts != [domain] else [domain]
         tmp = f"_mt_pipe_{domain}_nuclei.txt"
         with open(tmp, "w") as f:
-            f.write("\n".join(live_hosts[:50]))
-        stdout, _, _ = _run_cmd(
+            f.write("\n".join(targets))
+        stdout, stderr, rc = _run_cmd(
             [nuclei, "-l", tmp, "-silent", "-severity", "low,medium,high,critical",
              "-rate-limit", "50", "-timeout", "10"],
             timeout=600, label="nuclei",
         )
-        nuclei_count = len([l for l in stdout.splitlines() if l.strip()])
-        try: os.remove(tmp)
-        except: pass
+        if stdout.strip():
+            nuclei_count = len([l for l in stdout.splitlines() if l.strip()])
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
     _log("P4", f"Nuclei: {nuclei_count} findings", G if nuclei_count else D)
 
     # GF Patterns
     _log("P4", "GF pattern filtering...")
     _run_scanner("gf", domain, "gfpatterns")
-
-    # Subdomain takeover
-    _log("P4", "Subdomain takeover check...")
-    _run_scanner("takeover", domain, "takeover")
 
     return nuclei_count
 
@@ -319,21 +382,21 @@ def phase6(domain):
     print(f"  {C}{'='*55}{RST}")
 
     # Broken Link Hunter
-    _log("P6", "Broken Link Hunter (social/profile links)...")
+    _log("P6", "Broken Link Hunter...")
     _run_scanner("blh", domain, "blh")
 
     # 3rd Party Assets
-    _log("P6", "3rd Party Asset Links (Drive/SharePoint/GitHub)...")
+    _log("P6", "3rd Party Asset Links...")
     _run_scanner("tpa", domain, "tpa")
 
     # Credential URLs
-    _log("P6", "Credential/Config URL search...")
+    _log("P6", "Credential/Config URLs...")
     _run_scanner("cred", domain, "cred")
 
     # Sensitive Data
     _log("P6", "Sensitive data scan...")
-    from matthunder import find_sensitive_data
     try:
+        from matthunder import find_sensitive_data
         find_sensitive_data(domain)
         _log("P6", "Sensitive data scan complete", G)
     except Exception as e:
@@ -354,32 +417,32 @@ def run(domain, speed="standard"):
     print(f"\n  {'='*55}")
     print(f"  {BD}{Y}  FULL PIPELINE — {domain}{RST}")
     print(f"  {D}Speed: {speed} | Started: {time.strftime('%H:%M:%S')}{RST}")
-    print(f"  {D}Running ALL 20+ scanners in sequence...{RST}")
+    print(f"  {D}Running ALL scanners in sequence...{RST}")
     print(f"  {'='*55}")
 
-    # Phase 1: Passive Recon
+    # Phase 1
     subs = phase1(domain)
     total_scanners += 1
 
-    # Phase 2: Active Recon
+    # Phase 2
     live_hosts = phase2(domain, subs)
     total_scanners += 4
 
-    # Phase 3: Content Discovery
+    # Phase 3
     urls = phase3(domain, live_hosts)
     total_scanners += 5
 
-    # Phase 4: Automated Scanning
+    # Phase 4
     nuclei_count = phase4(domain, live_hosts, urls)
     total_findings += nuclei_count
-    total_scanners += 3
+    total_scanners += 2
 
-    # Phase 5: Vuln Scanning
+    # Phase 5
     vuln_count = phase5(domain)
     total_findings += vuln_count
     total_scanners += 7
 
-    # Phase 6: Intel & Discovery
+    # Phase 6
     phase6(domain)
     total_scanners += 4
 
@@ -398,8 +461,6 @@ def run(domain, speed="standard"):
     print(f"  Total findings:  {BD}{total_findings}{RST}")
     print(f"  Time:            {mins}m {secs}s")
     print(f"  Database:        matthunder_scans.db")
-    print()
-    print(f"  {D}Tip: Use [H] Scan History to review results{RST}")
     print()
 
     return {
