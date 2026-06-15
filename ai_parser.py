@@ -183,6 +183,7 @@ def _validate(data: dict) -> dict:
     resume = str(data.get("resume", "ask")).lower().strip()
     if resume not in {"ask", "continue", "restart"}:
         resume = "ask"
+    full = bool(data.get("full", False))
     lst = data.get("list")
     if scan == "tov" and (not lst or not isinstance(lst, str)):
         return {"error": "tov scan requires 'list' (path to subdomain file)"}
@@ -194,6 +195,7 @@ def _validate(data: dict) -> dict:
         "speed": speed,
         "list": lst,
         "resume": resume,
+        "full": full,
     }
 
 

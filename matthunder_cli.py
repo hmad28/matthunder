@@ -86,7 +86,8 @@ def _resolve_resume(target: str, auto_continue: bool, auto_restart: bool):
 
 
 def run_scan(scan: str, target: str = None, speed: str = "standard",
-             list_path: str = None, auto_continue: bool = False, auto_restart: bool = False):
+             list_path: str = None, auto_continue: bool = False, auto_restart: bool = False,
+             full: bool = False):
     if speed in SPEED_ALIAS:
         speed = SPEED_ALIAS[speed]
     if speed not in ("low", "standard", "fast"):
@@ -99,6 +100,10 @@ def run_scan(scan: str, target: str = None, speed: str = "standard",
             return "[!] Light scan butuh target"
         action = _resolve_resume(target, auto_continue, auto_restart)
         light_scan_target(target, resume=(action == "continue"))
+        if full:
+            from deep_full import run_full_chain
+            sub_file = os.path.join("subdomain", f"{target}.txt")
+            run_full_chain(target, subdomain_file=sub_file)
         return f"[OK] Light scan selesai: {target}"
     if scan in ("dks", "dps"):
         mode = "dark" if scan == "dks" else "deep"
@@ -106,6 +111,10 @@ def run_scan(scan: str, target: str = None, speed: str = "standard",
             return "[!] Dark/Deep scan butuh target"
         action = _resolve_resume(target, auto_continue, auto_restart)
         dark_deep_target(mode, target, resume=(action == "continue"))
+        if full:
+            from deep_full import run_full_chain
+            sub_file = os.path.join("subdomain", f"{target}.txt")
+            run_full_chain(target, subdomain_file=sub_file)
         return f"[OK] {mode.title()} scan selesai: {target}"
     if scan == "tov":
         if list_path:
@@ -204,6 +213,15 @@ def interactive_menu():
                 target = input("Check target (example: api.example.com): ").strip()
                 if target:
                     print("IN_SCOPE" if sc.in_scope(target) else "OUT_OF_SCOPE")
+        elif choice == "17":
+            from deep_full import run_full_chain
+            t = _normalize_target(input("Target (example.com): ").strip())
+            if t:
+                sub_file = os.path.join("subdomain", f"{t}.txt")
+                if not os.path.exists(sub_file):
+                    print(f"[!] {sub_file} not found. Run 'deep' first.")
+                else:
+                    run_full_chain(t, subdomain_file=sub_file)
         elif choice == "9":
             from matthunder import setup_menu
             setup_menu()
@@ -219,21 +237,21 @@ def interactive_menu():
             print("[!] Pilihan tidak valid.")
 
 
-def light_scan():
+def light_scan(full: bool = False):
     t = _normalize_target(input("Target (example.com): ").strip())
     if not t:
         return
     spd = input("Speed [low/standard/fast] (default standard): ").strip().lower() or "standard"
-    run_scan("lts", target=t, speed=spd)
+    run_scan("lts", target=t, speed=spd, full=full)
 
 
-def prompt_scan(kind: str):
+def prompt_scan(kind: str, full: bool = False):
     t = _normalize_target(input("Target (example.com): ").strip())
     if not t:
         return
     spd = input("Speed [low/standard/fast] (default standard): ").strip().lower() or "standard"
     scan = "dks" if kind == "dark" else "dps"
-    run_scan(scan, target=t, speed=spd)
+    run_scan(scan, target=t, speed=spd, full=full)
 
 
 def prompt_takeover():
@@ -279,6 +297,7 @@ def main():
     p.add_argument("--update", action="store_true", help="Run self-update from GitHub")
     p.add_argument("--telegram", action="store_true", help="Also start Telegram bot wrapper")
     p.add_argument("--info", action="store_true", help="Show version + AI status")
+    p.add_argument("--full", action="store_true", help="After deep/dark scan, run full inline scanner chain (blh/tpa/cred/ssti/cors/xss/apirecon/params) per active subdomain")
     args = p.parse_args()
 
     if args.info:
@@ -306,6 +325,7 @@ def main():
             list_path=result.get("list"),
             auto_continue=result.get("resume") == "continue",
             auto_restart=result.get("resume") == "restart",
+            full=result.get("full", False),
         )
         print(msg)
         if args.telegram:
@@ -361,6 +381,7 @@ def main():
         list_path=args.list,
         auto_continue=args.auto_continue,
         auto_restart=args.auto_restart,
+        full=args.full,
     )
     print(msg)
     if args.telegram:

@@ -307,15 +307,16 @@ def display_menu():
     print("  [14] XSS Scan (dalfox)")
     print("  [15] Pull Bug Bounty Scope (bbscope)")
     print("  [16] Check Scope (scoper)")
+    print("  [17] Full Inline Scanner Chain (per subdomain)")
     print("  [99] Out ")
     print("  [999] Update Tool")
     print("──────────────────────────────────────────────────────────────────────────────")
     while True:
-        choice = input("Choose Feature (0-16, 99, or 999): ").strip()
-        if choice in [str(i) for i in range(0, 17)] + ["99", "999"]:
+        choice = input("Choose Feature (0-17, 99, or 999): ").strip()
+        if choice in [str(i) for i in range(0, 18)] + ["99", "999"]:
             return choice
 
-        print("[!] Invalid choice. Enter number 0-16, 99, or 999")
+        print("[!] Invalid choice. Enter number 0-17, 99, or 999")
 
 def setup_menu():
     while True:
