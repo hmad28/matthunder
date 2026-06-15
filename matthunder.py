@@ -273,15 +273,21 @@ def print_logo():
     red = "\033[91m"
     reset = "\033[0m"
     logo = r"""
- ╔╦╗╔╦╗╔╦╗╦╔╦╗╦  ╦╔═╗╔═╗╦╦╔╗╔═╗╔═╗
- ║║║║║║║║║║║║║║  ╚╦╝║ ║║║╠╩╗║╣ ╠═╝
- ╩╩╩╩╩╩╩╩╩╩╩╩╩╩  ╩ ╚═╝╩╩╝╚═╝╚═╝╩"""
+███╗   ███╗ █████╗ ████████╗████████╗██╗  ██╗██╗   ██╗███╗   ██╗██████╗ ███████╗██████╗
+████╗ ████║██╔══██╗╚══██╔══╝╚══██╔══╝██║  ██║██║   ██║████╗  ██║██╔══██╗██╔════╝██╔══██╗
+██╔████╔██║███████║   ██║      ██║   ███████║██║   ██║██╔████╔██║██║  ██║█████╗  ██████╔╝
+██║╚██╔╝██║██╔══██║   ██║      ██║   ██╔══██║██║   ██║██║╚██╔╝██║██║  ██║██╔══╝  ██╔══██╗
+██║ ╚═╝ ██║██║  ██║   ██║      ██║   ██║  ██║╚██████╔╝██║ ╚████║██████╔╝███████╗██║  ██║
+╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝      ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═════╝ ╚══════╝╚═╝  ╚═╝
+"""
     try:
         print(red + logo + reset)
-        print(f"    matthunder v{version_status}  |  Author: hmad28  |  GitHub: hmad28/matthunder")
+        print(f"                                matthunder v{version_status}")
+        print("Author     : hmad28                 Contact     : @hmad28")
+        print("GitHub     : hmad28/matthunder")
     except UnicodeEncodeError:
-        print("[ matthunder ]")
-        print(f"v{version_status}")
+        print(red + "[ matthunder ]" + reset)
+        print(f"version: {version_status}")
 def display_menu():
     print("\n    Choose Feature:")
     print("  [0]  Feature Information")
