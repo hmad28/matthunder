@@ -16,5 +16,6 @@ sensitive_data/
 output/
 results/
 reports/
+reports/*
 matthunder_scans.db
 test_*.db

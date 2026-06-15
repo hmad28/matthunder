@@ -115,6 +115,15 @@ def run_scan(scan: str, target: str = None, speed: str = "standard",
             from deep_full import run_full_chain
             sub_file = os.path.join("subdomain", f"{target}.txt")
             run_full_chain(target, subdomain_file=sub_file)
+        else:
+            try:
+                from report_gen import generate as gen_report
+                res = gen_report(target)
+                print(f"\n[REPORT] HTML: {res['html']}")
+                print(f"[REPORT] TXT : {res['txt']}")
+                print(f"[REPORT] {res['findings']} findings collected")
+            except Exception as e:
+                print(f"[!] Report generation failed: {e}")
         return f"[OK] {mode.title()} scan selesai: {target}"
     if scan == "tov":
         if list_path:

@@ -125,5 +125,15 @@ def run_full_chain(
         label = next((l for c, l in SCANNER_CHAIN if c == code), code)
         print(f"    {label:<30} runs={stats['runs']:<3} ok={stats['ok']:<3} missing={stats['missing']:<3} errors={stats['errors']}")
     print(f"  Results stored in: matthunder_scans.db (table 'results')")
+
+    try:
+        from report_gen import generate as gen_report
+        res = gen_report(target)
+        print(f"\n[REPORT] HTML: {res['html']}")
+        print(f"[REPORT] TXT : {res['txt']}")
+        print(f"[REPORT] {res['findings']} findings collected (Nuclei + inline scanners)")
+    except Exception as e:
+        print(f"[!] Report generation failed: {e}")
+
     print(f"{'=' * 70}\n")
     return {"target": target, "subdomains": len(subdomains), "scanners": summary, "findings": total_findings}
