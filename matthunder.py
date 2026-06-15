@@ -206,6 +206,44 @@ OUTPUT_FOLDER_CRAWLED = "crawled"
 OUTPUT_FOLDER_SENSITIVE_DATA = "sensitive_data"
 OUTPUT_FOLDER_GREP = "crawled_filtered"
 OUTPUT_FOLDER_TAKEOVER = "take_over"
+
+
+def _count_lines(path: str) -> int:
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            return sum(1 for line in f if line.strip())
+    except (OSError, IOError):
+        return 0
+
+
+def print_results_summary(target: str) -> None:
+    """Print a summary of all result files for a target so the user knows
+    where to look after a scan completes."""
+    files = [
+        ("Subdomains",           os.path.join(OUTPUT_FOLDER_SUBDO, f"{target}.txt")),
+        ("Active hosts",         os.path.join(OUTPUT_FOLDER_ACTIVE, f"active_{target}.txt")),
+        ("Crawled URLs (gau)",   os.path.join(OUTPUT_FOLDER_CRAWLED, f"gau_{target}.txt")),
+        ("Crawled URLs (katana)",os.path.join(OUTPUT_FOLDER_CRAWLED, f"katana_{target}.txt")),
+        ("Crawled URLs (wayback)",os.path.join(OUTPUT_FOLDER_CRAWLED, f"wayback_{target}.txt")),
+        ("Crawled filtered",     os.path.join(OUTPUT_FOLDER_CRAWLED, f"crawled_filtered_{target}.txt")),
+        ("Nuclei basic",         os.path.join(OUTPUT_FOLDER_NUCLEI, f"nuc_active_{target}.txt")),
+        ("Nuclei JS/exposure",   os.path.join(OUTPUT_FOLDER_NUCLEI, f"nuc_exp_{target}.txt")),
+        ("Nuclei DAST",          os.path.join(OUTPUT_FOLDER_NUCLEI, f"nuc_dast_{target}.txt")),
+        ("Subdomain takeover",   os.path.join(OUTPUT_FOLDER_TAKEOVER, f"TOW_{target}.txt")),
+        ("Sensitive URLs",       os.path.join(OUTPUT_FOLDER_SENSITIVE_DATA, f"sen_url_{target}.txt")),
+    ]
+    print("")
+    print("=" * 70)
+    print(f"  Results for {target}")
+    print("=" * 70)
+    for label, path in files:
+        n = _count_lines(path)
+        exists = os.path.exists(path)
+        marker = "[+]" if n > 0 else ("[-]" if exists else "[ ]")
+        size = os.path.getsize(path) if exists else 0
+        size_kb = size / 1024
+        print(f"  {marker} {label:<22} {n:>8} entries  {size_kb:>9.1f} KB  {path}")
+    print("=" * 70)
 os.makedirs(OUTPUT_FOLDER_TAKEOVER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER_GREP, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER_SUBDO, exist_ok=True)
@@ -1583,6 +1621,7 @@ def light_scan_target(target, resume=False):
             print(f"[⏱️] Nuclei scanning process completed in {hours} hours {minutes} minutes {seconds} seconds")
 
         print(f"[✓] All processes completed for target: {target}")
+        print_results_summary(target)
 
 def light_scan():
         target = get_target_input()
@@ -1603,6 +1642,7 @@ def light_scan():
         minutes, seconds = divmod(remaining, 60)
         print(f"[⏱️] Nuclei scanning process completed in {hours} hours {minutes} minutes {seconds} seconds")
         print(f"[✓] All processes completed for target: {target}")
+        print_results_summary(target)
 def dark_deep_target(mode, target, resume=False):
         scan_args = ask_scan_speed()
         subdomain_file = os.path.join(OUTPUT_FOLDER_SUBDO, f"{target}.txt")
@@ -1967,6 +2007,7 @@ def dark_deep_target(mode, target, resume=False):
             print(f"[⏱️] Nuclei scanning process completed in {hours} hours {minutes} minutes {seconds} seconds")
 
         print(f"[✓] All processes completed for target: {target}")
+        print_results_summary(target)
 
 def dark_deep(mode):
         target = get_target_input()
@@ -2020,6 +2061,7 @@ def dark_deep(mode):
         minutes, seconds = divmod(remaining, 60)
         print(f"[⏱️] Nuclei scanning process completed in {hours} hours {minutes} minutes {seconds} seconds")
         print(f"[✓] All processes completed for target: {target}")
+        print_results_summary(target)
 
 def feature_update_tool():
     VERSION_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/version.txt"
