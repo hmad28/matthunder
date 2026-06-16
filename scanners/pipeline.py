@@ -72,17 +72,16 @@ def _run_scanner(scan_key, domain, label):
         _log("!", f"{label}: not registered", D)
         return {}
     try:
-        import inspect
-        sig = inspect.signature(runner)
-        params = list(sig.parameters.keys())
-        # Call with just domain if it accepts it
-        if len(params) == 1:
-            result = runner(domain)
-        elif len(params) == 2 and params[1] in ("platforms", "services", "categories"):
-            result = runner(domain, [])
-        else:
-            result = runner(domain)
+        result = runner(domain)
         return result if isinstance(result, dict) else {}
+    except TypeError:
+        # Scanner needs extra args (platforms, services, categories)
+        try:
+            result = runner(domain, [])
+            return result if isinstance(result, dict) else {}
+        except Exception as e:
+            _log("!", f"{label}: {e}", Y)
+            return {}
     except Exception as e:
         _log("!", f"{label}: {e}", Y)
         return {}
@@ -322,28 +321,58 @@ def phase4(domain, live_hosts, urls):
     print(f"  {Y}{BD}PHASE 4: AUTOMATED SCANNING{RST}")
     print(f"  {Y}{'='*55}{RST}")
 
-    # Nuclei
-    _log("P4", "Nuclei CVE/misconfig scan...")
     nuclei = _find_bin("nuclei")
     nuclei_count = 0
+
+    # Scan 1: Live hosts with nuclei templates
     if nuclei and live_hosts:
-        # Use live hosts or root domain
-        targets = live_hosts[:50] if live_hosts != [domain] else [domain]
+        _log("P4", f"Nuclei scanning {min(len(live_hosts), 30)} live hosts...")
+        targets = live_hosts[:30] if live_hosts != [domain] else [domain]
         tmp = f"_mt_pipe_{domain}_nuclei.txt"
         with open(tmp, "w") as f:
             f.write("\n".join(targets))
         stdout, stderr, rc = _run_cmd(
             [nuclei, "-l", tmp, "-silent", "-severity", "low,medium,high,critical",
-             "-rate-limit", "50", "-timeout", "10"],
-            timeout=600, label="nuclei",
+             "-rate-limit", "100", "-timeout", "5"],
+            timeout=900, label="nuclei",
         )
         if stdout.strip():
             nuclei_count = len([l for l in stdout.splitlines() if l.strip()])
+            # Print first 10 findings
+            for line in stdout.splitlines()[:10]:
+                if line.strip():
+                    _log("P4", f"  {line.strip()}", G)
         try:
             os.remove(tmp)
         except OSError:
             pass
-    _log("P4", f"Nuclei: {nuclei_count} findings", G if nuclei_count else D)
+
+    # Scan 2: Historical URLs with nuclei (finds vulns in old URLs)
+    if nuclei and urls and len(urls) > 0:
+        param_urls = [u for u in urls if "?" in u and "=" in u]
+        if param_urls:
+            _log("P4", f"Nuclei scanning {min(len(param_urls), 500)} historical URLs with params...")
+            tmp_urls = f"_mt_pipe_{domain}_urls.txt"
+            with open(tmp_urls, "w") as f:
+                f.write("\n".join(param_urls[:500]))
+            stdout2, _, _ = _run_cmd(
+                [nuclei, "-l", tmp_urls, "-silent", "-severity", "low,medium,high,critical",
+                 "-rate-limit", "100", "-timeout", "5"],
+                timeout=900, label="nuclei-urls",
+            )
+            if stdout2.strip():
+                url_findings = len([l for l in stdout2.splitlines() if l.strip()])
+                nuclei_count += url_findings
+                _log("P4", f"Nuclei URL scan: {url_findings} additional findings", G if url_findings else D)
+                for line in stdout2.splitlines()[:10]:
+                    if line.strip():
+                        _log("P4", f"  {line.strip()}", G)
+            try:
+                os.remove(tmp_urls)
+            except OSError:
+                pass
+
+    _log("P4", f"Nuclei total: {nuclei_count} findings", G if nuclei_count else D)
 
     # GF Patterns
     _log("P4", "GF pattern filtering...")
@@ -354,10 +383,14 @@ def phase4(domain, live_hosts, urls):
 
 # ─── Phase 5: Vuln Scanning ─────────────────────────────────────────────────
 
-def phase5(domain):
+def phase5(domain, urls):
     print(f"\n  {R}{'='*55}{RST}")
     print(f"  {R}{BD}PHASE 5: VULNERABILITY SCANNING{RST}")
     print(f"  {R}{'='*55}{RST}")
+
+    # Show URL stats
+    param_urls = [u for u in urls if "?" in u and "=" in u]
+    _log("P5", f"URLs with params: {len(param_urls)} (from {len(urls)} total)")
 
     vulns = [
         ("sqli",         "SQL Injection"),
@@ -371,14 +404,18 @@ def phase5(domain):
 
     total = 0
     for key, label in vulns:
-        _log("P5", f"{label}...")
+        _log("P5", f"Running {label}...")
         result = _run_scanner(key, domain, label)
         count = result.get("findings", 0)
         total += count
         if count > 0:
-            _log("P5", f"{label}: {count} hits!", G)
+            _log("P5", f"  {label}: {count} HITS!", G)
+            # Show details
+            for k in ("endpoints", "params", "probes"):
+                if k in result and result[k]:
+                    _log("P5", f"    {k}: {result[k]}", G)
         else:
-            _log("P5", f"{label}: 0", D)
+            _log("P5", f"  {label}: 0", D)
 
     return total
 
@@ -447,7 +484,7 @@ def run(domain, speed="standard"):
     total_scanners += 2
 
     # Phase 5
-    vuln_count = phase5(domain)
+    vuln_count = phase5(domain, urls)
     total_findings += vuln_count
     total_scanners += 7
 
