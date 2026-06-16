@@ -31,12 +31,18 @@ def _log(phase, msg, color=C):
 
 
 def _find_bin(name):
-    found = shutil.which(name)
-    if found:
-        return found
-    go_bin = os.path.join(os.path.expanduser("~"), "go", "bin", name + (".exe" if os.name == "nt" else ""))
+    """Find binary — prioritize Go bin over Python pip scripts."""
+    ext = ".exe" if os.name == "nt" else ""
+    # 1. Check Go bin first (most security tools live here)
+    go_bin = os.path.join(os.path.expanduser("~"), "go", "bin", name + ext)
     if os.path.exists(go_bin):
         return go_bin
+    # 2. Check PATH but skip Python Scripts dir (httpx pip != httpx Go)
+    found = shutil.which(name)
+    if found:
+        if "Python" in found and "Scripts" in found:
+            return None  # This is a pip package, not the security tool
+        return found
     return None
 
 

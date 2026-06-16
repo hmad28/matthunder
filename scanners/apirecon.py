@@ -24,18 +24,15 @@ import httpx
 
 from . import SCANNER_REGISTRY
 from .common import (
+    resolve_tool,
     USER_AGENT, canonical_url, crawl_domain, extract_anchors, finish_scan,
     host_in_scope, log, normalize_domain, open_db, utc_now_iso,
 )
 
 
 def _resolve(name: str) -> Optional[str]:
-    gopath_bin = os.path.join(os.path.expanduser("~"), "go", "bin")
-    cand = os.path.join(gopath_bin, name + (".exe" if os.name == "nt" else ""))
-    if os.path.exists(cand):
-        return cand
-    found = shutil.which(name)
-    return found
+    return resolve_tool(name)
+
 
 
 def _run(cmd: list[str], timeout: int = 300) -> tuple[int, str, str]:

@@ -3,7 +3,9 @@ Common helpers for scanners package.
 """
 
 import json
+import os
 import re
+import shutil
 import sqlite3
 import time
 import uuid
@@ -20,6 +22,28 @@ DEFAULT_TIMEOUT = 10.0
 USER_AGENT = "matthunder/1.4 (+https://github.com/hmad28/matthunder)"
 MAX_PAGES_PER_SCAN = 50
 MAX_LINKS_PER_PAGE = 200
+
+
+def resolve_tool(name):
+    """Find a tool binary — prioritize Go bin over Python pip scripts.
+
+    Go tools (subfinder, httpx, nuclei, etc) live in ~/go/bin/.
+    Python pip packages with same names (httpx) live in Python/Scripts/.
+    Always prefer the Go version.
+    """
+    import shutil
+    ext = ".exe" if os.name == "nt" else ""
+    # 1. Go bin first
+    go_bin = os.path.join(os.path.expanduser("~"), "go", "bin", name + ext)
+    if os.path.exists(go_bin):
+        return go_bin
+    # 2. PATH, but skip Python Scripts (pip httpx != Go httpx)
+    found = shutil.which(name)
+    if found:
+        if "Python" in found and "Scripts" in found:
+            return None
+        return found
+    return None
 
 
 def utc_now_iso() -> str:

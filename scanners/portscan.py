@@ -16,6 +16,7 @@ from typing import Optional
 
 from . import SCANNER_REGISTRY
 from .common import (
+    resolve_tool,
     finish_scan, log, normalize_domain, open_db, utc_now_iso,
 )
 
@@ -38,11 +39,8 @@ PORT_SERVICE = {
 
 
 def _resolve(name: str) -> Optional[str]:
-    gopath_bin = os.path.join(os.path.expanduser("~"), "go", "bin")
-    cand = os.path.join(gopath_bin, name + (".exe" if os.name == "nt" else ""))
-    if os.path.exists(cand):
-        return cand
-    return shutil.which(name)
+    return resolve_tool(name)
+
 
 
 def _socket_scan(domain: str, ports: list[int], timeout: float = 1.5) -> list[dict]:

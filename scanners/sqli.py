@@ -18,6 +18,7 @@ import httpx
 
 from . import SCANNER_REGISTRY
 from .common import (
+    resolve_tool,
     DEFAULT_TIMEOUT, USER_AGENT, canonical_url, crawl_domain,
     extract_anchors, finish_scan, host_in_scope, log, normalize_domain,
     open_db, utc_now_iso,
@@ -25,11 +26,8 @@ from .common import (
 
 
 def _resolve(name: str) -> Optional[str]:
-    gopath_bin = os.path.join(os.path.expanduser("~"), "go", "bin")
-    cand = os.path.join(gopath_bin, name + (".exe" if os.name == "nt" else ""))
-    if os.path.exists(cand):
-        return cand
-    return shutil.which(name)
+    return resolve_tool(name)
+
 
 
 SQLI_PAYLOADS = ["'", "\"", "' OR '1'='1", "\" OR \"1\"=\"1", "1' ORDER BY 1--", "1 UNION SELECT NULL--"]

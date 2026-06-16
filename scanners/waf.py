@@ -17,13 +17,15 @@ import httpx
 
 from . import SCANNER_REGISTRY
 from .common import (
+    resolve_tool,
     DEFAULT_TIMEOUT, USER_AGENT, finish_scan, log, normalize_domain,
     open_db, utc_now_iso,
 )
 
 
 def _resolve(name: str) -> Optional[str]:
-    return shutil.which(name)
+    return resolve_tool(name)
+
 
 
 # Common WAF signatures (header patterns)

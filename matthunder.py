@@ -51,15 +51,17 @@ def resolve_tool(tool_name):
 
     Returns absolute path if found, or None if missing (caller should skip step).
     """
-    candidates = []
-    go_bin = os.path.join(os.path.expanduser("~"), "go", "bin")
-    candidates.append(os.path.join(go_bin, tool_name + (".exe" if os.name == "nt" else "")))
+    ext = ".exe" if os.name == "nt" else ""
+    # 1. Check Go bin first (most security tools live here)
+    go_bin = os.path.join(os.path.expanduser("~"), "go", "bin", tool_name + ext)
+    if os.path.exists(go_bin):
+        return go_bin
+    # 2. Check PATH but skip Python Scripts dir (httpx pip != httpx Go)
     found = shutil.which(tool_name)
     if found:
-        candidates.append(found)
-    for candidate in candidates:
-        if candidate and os.path.exists(candidate):
-            return candidate
+        if "Python" in found and "Scripts" in found:
+            return None  # This is a pip package, not the security tool
+        return found
     return None
 
 

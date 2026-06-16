@@ -19,6 +19,7 @@ from urllib.parse import urlparse, parse_qs
 from . import SCANNER_REGISTRY
 from .common import (
     crawl_domain, finish_scan, log, normalize_domain, open_db, utc_now_iso,
+    resolve_tool,
 )
 
 
@@ -96,7 +97,7 @@ def run(domain: str, max_pages: int = 50) -> dict:
     # Also try gau for historical URLs
     import shutil
     import subprocess
-    gau = shutil.which("gau")
+    gau = resolve_tool("gau")
     if gau:
         try:
             proc = subprocess.run([gau, "--subs", domain], capture_output=True, text=True, timeout=60)
