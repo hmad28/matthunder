@@ -8,6 +8,7 @@ Usage:
   python matthunder_cli.py lfi example.com
 """
 
+import os
 import re
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
@@ -17,7 +18,8 @@ from . import SCANNER_REGISTRY
 from .common import (
     DEFAULT_TIMEOUT, USER_AGENT, canonical_url, crawl_domain,
     finish_scan, host_in_scope, log, normalize_domain,
-    open_db, utc_now_iso,
+    open_db, utc_now_iso, is_dynamic_param, merge_crawled_and_fallback,
+    FALLBACK_PARAMS, FALLBACK_ENDPOINTS,
 )
 
 
@@ -33,6 +35,15 @@ LFI_PAYLOADS = [
     ("php://filter/convert.base64-encode/resource=index.php", "PD9w"),
     ("expect://id", "uid="),
 ]
+
+
+def _load_pipeline_urls() -> list[str]:
+    """Load pre-discovered URLs from pipeline Phase 3."""
+    url_file = os.environ.get("MT_PIPELINE_URLS", "")
+    if url_file and os.path.exists(url_file):
+        with open(url_file, encoding="utf-8", errors="ignore") as f:
+            return [l.strip() for l in f if l.strip().startswith("http")]
+    return []
 
 
 def _probe_url(url: str, param: str, client: httpx.Client) -> dict:
@@ -64,7 +75,7 @@ def _probe_url(url: str, param: str, client: httpx.Client) -> dict:
     return {"vulnerable": False}
 
 
-def run(domain: str, max_pages: int = 30) -> dict:
+def run(domain: str, max_pages: int = 50) -> dict:
     domain = normalize_domain(domain)
 
     con = open_db()
@@ -77,22 +88,45 @@ def run(domain: str, max_pages: int = 30) -> dict:
     scan_id = con.execute("SELECT id FROM scans WHERE rowid=?", (scan_id,)).fetchone()["id"]
     log(con, scan_id, f"LFI scan started - domain: {domain}")
 
-    pages = crawl_domain(domain, max_pages=max_pages)
-    log(con, scan_id, f"Crawled {len(pages)} pages")
+    # Load pipeline URLs if available
+    pipeline_urls = _load_pipeline_urls()
+    if pipeline_urls:
+        log(con, scan_id, f"Using {len(pipeline_urls)} pre-discovered URLs from pipeline")
+        targets = merge_crawled_and_fallback(pipeline_urls, domain, "lfi", max_pages)
+    else:
+        pages = crawl_domain(domain, max_pages=max_pages)
+        log(con, scan_id, f"Crawled {len(pages)} pages")
+        targets = []
+        seen = set()
+        for page_url, html in pages:
+            parsed = urlparse(page_url)
+            params = list(parse_qs(parsed.query).keys())
+            for param in params:
+                key = (page_url.split("?")[0], param)
+                if key not in seen:
+                    seen.add(key)
+                    targets.append((page_url, param))
+        # Add fallback endpoints
+        base_urls = [f"https://{domain}", f"http://{domain}"]
+        for base in base_urls:
+            for endpoint in FALLBACK_ENDPOINTS:
+                full = f"{base}{endpoint}"
+                for param in FALLBACK_PARAMS["lfi"][:6]:
+                    key = (full, param)
+                    if key not in seen:
+                        seen.add(key)
+                        targets.append((full, param))
+
+    log(con, scan_id, f"Testing {len(targets)} URL+param targets")
 
     findings: list[dict] = []
 
     with httpx.Client(headers={"User-Agent": USER_AGENT}, follow_redirects=True, timeout=DEFAULT_TIMEOUT) as client:
-        for page_url, html in pages:
-            parsed = urlparse(page_url)
-            params = list(parse_qs(parsed.query).keys())
-            if not params:
-                continue
-            for param in params:
-                result = _probe_url(page_url, param, client)
-                if result.get("vulnerable"):
-                    findings.append(result)
-                    log(con, scan_id, f"LFI found: {page_url} param={param}")
+        for url, param in targets[:200]:
+            result = _probe_url(url, param, client)
+            if result.get("vulnerable"):
+                findings.append(result)
+                log(con, scan_id, f"LFI found: {url} param={param}")
 
     for f in findings:
         con.execute(
@@ -102,9 +136,9 @@ def run(domain: str, max_pages: int = 30) -> dict:
              f"param={f['param']} payload={f['payload']} evidence={f['evidence']}", utc_now_iso()),
         )
     con.commit()
-    finish_scan(con, scan_id, status="completed", total_sources=len(pages), total_links=len(findings))
+    finish_scan(con, scan_id, status="completed", total_sources=len(targets), total_links=len(findings))
     con.close()
-    return {"scan_id": scan_id, "scanner": "lfi", "domain": domain, "pages": len(pages), "findings": len(findings)}
+    return {"scan_id": scan_id, "scanner": "lfi", "domain": domain, "pages": len(targets), "findings": len(findings)}
 
 
 SCANNER_REGISTRY["lfi"] = run

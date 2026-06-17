@@ -19,3 +19,9 @@ reports/
 reports/*
 matthunder_scans.db
 test_*.db
+# Per-user runtime config (secrets + per-user target lists)
+targets.json
+user_config.json
+# Banner cache (regenerated)
+matthunder_banner.png
+

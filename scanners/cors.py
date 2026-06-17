@@ -1,5 +1,5 @@
 """
-CORS - Cross-Origin Resource Sharing misconfiguration scanner.
+cors - Cross-Origin Resource Sharing misconfiguration scanner.
 
 Probes each in-scope page with malicious Origin headers and inspects
 Access-Control-Allow-* response headers. Inspired by Corsy patterns.
@@ -11,6 +11,7 @@ Detects:
   - Subdomain-regex bypasses
 """
 
+import os
 from urllib.parse import urlparse
 
 import httpx
@@ -55,7 +56,16 @@ def _classify(acao: str, acac: str, origin_sent: str) -> str:
     return "ok"
 
 
-def run(domain: str, max_pages: int = 20) -> dict:
+def _load_pipeline_urls() -> list[str]:
+    """Load pre-discovered URLs from pipeline Phase 3."""
+    url_file = os.environ.get("MT_PIPELINE_URLS", "")
+    if url_file and os.path.exists(url_file):
+        with open(url_file, encoding="utf-8", errors="ignore") as f:
+            return [l.strip().split("?")[0] for l in f if l.strip().startswith("http")]
+    return []
+
+
+def run(domain: str, max_pages: int = 30) -> dict:
     domain = normalize_domain(domain)
 
     con = open_db()
@@ -68,8 +78,19 @@ def run(domain: str, max_pages: int = 20) -> dict:
     scan_id = con.execute("SELECT id FROM scans WHERE rowid=?", (scan_id,)).fetchone()["id"]
     log(con, scan_id, f"CORS scan started - domain: {domain}")
 
-    pages = crawl_domain(domain, max_pages=max_pages)
-    log(con, scan_id, f"Crawled {len(pages)} pages")
+    # Load pipeline URLs if available
+    pipeline_urls = _load_pipeline_urls()
+    pages = []
+    if pipeline_urls:
+        log(con, scan_id, f"Using {len(pipeline_urls)} pre-discovered URLs from pipeline")
+        seen = set()
+        for u in pipeline_urls:
+            if u not in seen:
+                seen.add(u)
+                pages.append((u, ""))
+    else:
+        pages = crawl_domain(domain, max_pages=max_pages)
+        log(con, scan_id, f"Crawled {len(pages)} pages")
 
     findings: list[dict] = []
     tested = 0

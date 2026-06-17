@@ -22,6 +22,7 @@ Modules:
   gfpatterns     — GF-style URL pattern filtering by vuln type
   gate           — 7-Question Gate for finding validation
   attackrank     — Attack Surface Ranker (prioritize targets)
+  acunetix       — Pull scans/vulnerabilities from Acunetix API
 """
 
 DB_PATH = "matthunder_scans.db"
@@ -31,5 +32,5 @@ SCANNER_REGISTRY = {}
 from . import (
     blh, thirdparty, cred, apirecon, ssti, cors, xss,
     sqli, lfi, crlf, openredirect, portscan, waf, jsanalysis, fuzzer,
-    pipeline, techfingerprint, gfpatterns, gate, attackrank,
+    pipeline, techfingerprint, gfpatterns, gate, attackrank, acunetix,
 )  # noqa: E402,F401

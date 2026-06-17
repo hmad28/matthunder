@@ -203,9 +203,13 @@ def crawl_domain(domain: str, max_pages: int = MAX_PAGES_PER_SCAN) -> list[tuple
     pages: list[tuple[str, str]] = []
     seen: set[str] = set()
     queue: list[str] = list(get_root_urls(domain))
+    start_time = time.time()
+    max_crawl_time = 30  # Max 30 seconds for crawling
     try:
         with httpx.Client(headers={"User-Agent": USER_AGENT}, follow_redirects=True, timeout=DEFAULT_TIMEOUT) as client:
             while queue and len(pages) < max_pages:
+                if time.time() - start_time > max_crawl_time:
+                    break
                 url = queue.pop(0)
                 cu = canonical_url(url)
                 if not cu or cu in seen:
@@ -247,3 +251,144 @@ def dedupe_preserve_order(items: Iterable) -> list:
         seen.add(it)
         out.append(it)
     return out
+
+
+# ─── Dynamic parameter pre-check ─────────────────────────────────────────────
+
+def is_dynamic_param(url: str, param: str, client: httpx.Client) -> bool:
+    """Check if a parameter actually influences the response.
+
+    Sends two different values and compares responses.
+    If responses are identical, the parameter is static (not injectable).
+    """
+    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+
+    parsed = urlparse(url)
+    qs = parse_qs(parsed.query, keep_blank_values=True)
+    if param not in qs:
+        return False
+
+    val1 = "mtcheck1"
+    val2 = "mtcheck2"
+
+    qs1 = dict(qs)
+    qs1[param] = [val1]
+    url1 = urlunparse(parsed._replace(query=urlencode(qs1, doseq=True)))
+
+    qs2 = dict(qs)
+    qs2[param] = [val2]
+    url2 = urlunparse(parsed._replace(query=urlencode(qs2, doseq=True)))
+
+    try:
+        r1 = client.get(url1, timeout=DEFAULT_TIMEOUT, follow_redirects=True)
+        r2 = client.get(url2, timeout=DEFAULT_TIMEOUT, follow_redirects=True)
+        if r1.status_code != r2.status_code:
+            return True
+        if abs(len(r1.text) - len(r2.text)) > 20:
+            return True
+        if r1.text[:500] != r2.text[:500]:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+# ─── Fallback endpoint discovery ─────────────────────────────────────────────
+
+FALLBACK_ENDPOINTS = [
+    "/search", "/api/search", "/api/v1/search", "/api/query",
+    "/login", "/api/login", "/admin", "/api/users", "/api/items",
+    "/api/products", "/profile", "/user", "/page", "/redirect",
+    "/api/v1/users", "/api/v1/items", "/q", "/find", "/error",
+    "/contact", "/feedback", "/api/comments", "/api/reviews",
+]
+
+FALLBACK_PARAMS = {
+    "sqli": ["id", "user", "username", "search", "q", "query", "filter",
+             "sort", "order", "page", "category", "item", "product",
+             "email", "name", "ref", "article", "post", "comment"],
+    "xss": ["q", "search", "query", "s", "keyword", "name", "input",
+            "text", "msg", "error", "redirect", "url", "page",
+            "callback", "id", "user", "term", "data"],
+    "lfi": ["file", "path", "page", "doc", "template", "include", "url",
+            "load", "read", "download", "content", "view", "open",
+            "dir", "folder", "document", "img", "image"],
+    "openredirect": ["url", "redirect", "redirect_url", "redirect_uri",
+                     "return", "return_url", "next", "go", "goto",
+                     "target", "dest", "destination", "redir",
+                     "continue", "returnPath", "to", "out", "ref"],
+}
+
+
+def discover_targets(domain: str, max_pages: int = 50) -> list[tuple[str, str]]:
+    """Crawl domain and return list of (url, param) targets for injection testing.
+
+    Combines crawled URLs with fallback endpoint testing.
+    """
+    pages = crawl_domain(domain, max_pages=max_pages)
+    targets: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    # From crawled pages
+    for page_url, html in pages:
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(page_url)
+        params = list(parse_qs(parsed.query).keys())
+        for param in params:
+            key = (page_url.split("?")[0], param)
+            if key not in seen:
+                seen.add(key)
+                targets.append((page_url, param))
+
+    # Fallback: test common endpoints with common params
+    base_urls = [f"https://{domain}", f"http://{domain}"]
+    for base in base_urls:
+        for endpoint in FALLBACK_ENDPOINTS:
+            full = f"{base}{endpoint}"
+            for param in FALLBACK_PARAMS.get("sqli", [])[:6]:
+                key = (full, param)
+                if key not in seen:
+                    seen.add(key)
+                    targets.append((full, param))
+
+    return targets
+
+
+def merge_crawled_and_fallback(crawled_urls: list[str], domain: str,
+                               scanner_type: str = "sqli",
+                               max_pages: int = 50) -> list[tuple[str, str]]:
+    """Merge pre-discovered URLs (from pipeline) with fallback endpoint testing.
+
+    Returns list of (url, param) targets.
+    """
+    from urllib.parse import urlparse, parse_qs
+
+    targets: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    # From pre-discovered URLs
+    for url in crawled_urls:
+        if "?" not in url:
+            continue
+        parsed = urlparse(url)
+        params = list(parse_qs(parsed.query).keys())
+        for param in params:
+            base = url.split("?")[0]
+            key = (base, param)
+            if key not in seen:
+                seen.add(key)
+                targets.append((url, param))
+
+    # Fallback endpoints
+    base_urls = [f"https://{domain}", f"http://{domain}"]
+    params_list = FALLBACK_PARAMS.get(scanner_type, FALLBACK_PARAMS["sqli"])
+    for base in base_urls:
+        for endpoint in FALLBACK_ENDPOINTS:
+            full = f"{base}{endpoint}"
+            for param in params_list[:6]:
+                key = (full, param)
+                if key not in seen:
+                    seen.add(key)
+                    targets.append((full, param))
+
+    return targets

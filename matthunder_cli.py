@@ -236,6 +236,7 @@ FEATURES = {
     "41": ("scoper",      "Check Scope",          "Check if a target is in-scope for a program"),
     "42": ("fullchain",   "Full Scanner Chain",   "Run all scanners on each active subdomain"),
     "43": ("gate",        "7-Question Gate",      "Validate finding before submission (kill weak bugs)"),
+    "50": ("acunetix",    "Acunetix Connect",     "Pull scans + vulns from Acunetix API (list/summary/vulns)"),
 }
 
 
@@ -280,6 +281,12 @@ def display_menu():
         tag, name, desc = FEATURES[key]
         print(f"  [{_c(C.BD, key)}]  {name:<20} {_c(C.D, desc)}")
 
+    # Integrations
+    print(f"\n  {_c(C.CY, '── Integrations ────────────────────────────────────')}")
+    for key in ("50",):
+        tag, name, desc = FEATURES[key]
+        print(f"  [{_c(C.BD, key)}]  {name:<20} {_c(C.D, desc)}")
+
     print()
     print(f"  [{_c(C.BD, 'H')}]  Scan History          {_c(C.D, 'View previous scan results')}")
     print(f"  [{_c(C.BD, 'S')}]  Setup / Config        {_c(C.D, 'Bot token, speed, katana limit')}")
@@ -289,7 +296,7 @@ def display_menu():
     print()
     print(f"  {_c(C.D, '──────────────────────────────────────────────────────────────────────────────')}")
 
-    valid = [str(i) for i in range(0, 50)] + ["h", "s", "i", "u", "q"]
+    valid = [str(i) for i in range(0, 60)] + ["h", "s", "i", "u", "q"]
     while True:
         choice = input(f"  {_c(C.BD, 'Choose')} > ").strip().lower()
         if choice in valid:
@@ -362,6 +369,24 @@ def run_scan(scan: str, target: str = None, speed: str = "standard",
         print(f"\n  {_c(C.G, '[*]')} Scanning for sensitive data on {_c(C.BD, target)}")
         find_sensitive_data(target)
         return f"  {_c(C.G, '[OK]')} Sensitive scan selesai: {target}"
+
+    if scan == "acunetix":
+        from scanners.acunetix import run_subcommand
+        action = (target or "summary").lower()
+        valid_actions = {"list", "targets", "summary", "vulns", "detail"}
+        if action not in valid_actions:
+            return f"  {_c(C.R, '[!]')} acunetix action tidak dikenal: {action}\n      Available: list | targets | summary | vulns <scan_id> | detail <vuln_id>"
+        extra = []
+        if action in ("vulns", "detail"):
+            extra = [speed] if speed and speed not in ("low", "standard", "fast") else []
+            if not extra and len(sys.argv) > 3:
+                extra = [sys.argv[3]]
+        result = run_subcommand(action, *extra)
+        if isinstance(result, dict):
+            if not result.get("ok"):
+                return f"  {_c(C.R, '[!]')} Acunetix gagal: {result.get('error', '?')}"
+            return f"  {_c(C.G, '[OK]')} Acunetix {action} selesai: {result.get('count', result.get('findings', '?'))} items"
+        return f"  {_c(C.G, '[OK]')} Acunetix {action} selesai"
 
     if scan in ("blh", "bac", "cred", "apirecon", "params", "ssti", "cors", "xss",
                 "sqli", "lfi", "crlf", "openredirect", "portscan", "waf", "jsanalysis", "fuzzer",
@@ -524,6 +549,10 @@ def interactive_menu():
             except Exception as e:
                 print(f"  {_c(C.R, '[!]')} Gate error: {e}")
 
+        # ── Integrations ──────────────────────────────────────────────────
+        elif choice == "50":
+            _run_acunetix_menu()
+
         # ── Meta / Navigation ───────────────────────────────────────────────
         elif choice == "h":
             show_scan_history()
@@ -655,6 +684,31 @@ def _run_fullchain():
     from deep_full import run_full_chain
     print(f"\n  {_c(C.G, '[*]')} Running full scanner chain on {_c(C.BD, t)}")
     run_full_chain(t, subdomain_file=sub_file)
+
+
+def _run_acunetix_menu():
+    from scanners.acunetix import run_subcommand
+    print(f"\n  {_c(C.BD, 'ACUNETIX')}  {_c(C.D, '(pull data from Acunetix API)')}")
+    print(f"  {_c(C.D, '[1]')} List all scans")
+    print(f"  {_c(C.D, '[2]')} List all targets")
+    print(f"  {_c(C.D, '[3]')} Summary / dashboard (vuln counts by severity)")
+    print(f"  {_c(C.D, '[4]')} Vulnerabilities for a specific scan")
+    print(f"  {_c(C.D, '[5]')} Full detail of a single vulnerability")
+    c = input(f"  {_c(C.BD, 'Pilih')} (1-5): ").strip()
+    if c == "1":
+        print(run_subcommand("list"))
+    elif c == "2":
+        print(run_subcommand("targets"))
+    elif c == "3":
+        print(run_subcommand("summary"))
+    elif c == "4":
+        sid = input(f"  {_c(C.BD, 'Scan ID')}: ").strip()
+        if sid:
+            print(run_subcommand("vulns", sid))
+    elif c == "5":
+        vid = input(f"  {_c(C.BD, 'Vuln ID')}: ").strip()
+        if vid:
+            print(run_subcommand("detail", vid))
 
 
 # ─── Feature info ────────────────────────────────────────────────────────────
@@ -822,9 +876,9 @@ def main():
         prog="matthunder",
         description="matthunder CLI — recon automation with optional AI parser (BYOK)",
     )
-    p.add_argument("scan", nargs="?", help="pipeline | light | dark | deep | sqli | lfi | crlf | openredirect | xss | ssti | cors | portscan | waf | jsanalysis | fuzzer | tech | rank | gf | gate | takeover | sensitive | blh | tpa | cred | apirecon | params")
-    p.add_argument("target", nargs="?", help="Target domain")
-    p.add_argument("speed", nargs="?", default="standard", help="low | standard | fast (or 1/2/3)")
+    p.add_argument("scan", nargs="?", help="pipeline | light | dark | deep | sqli | lfi | crlf | openredirect | xss | ssti | cors | portscan | waf | jsanalysis | fuzzer | tech | rank | gf | gate | takeover | sensitive | blh | tpa | cred | apirecon | params | acunetix")
+    p.add_argument("target", nargs="?", help="Target domain (or acunetix action: list/targets/summary/vulns/detail)")
+    p.add_argument("speed", nargs="?", default="standard", help="low | standard | fast (or 1/2/3) | acunetix scan_id/vuln_id")
     p.add_argument("-l", "--list", help="Subdomain list file (for takeover mass)")
     p.add_argument("-ac", "--auto-continue", action="store_true")
     p.add_argument("-ar", "--auto-restart", action="store_true")
@@ -913,6 +967,7 @@ def main():
         "gfpatterns": "gfpatterns", "gf": "gfpatterns", "patterns": "gfpatterns",
         "gate": "gate", "validate": "gate", "triage": "gate",
         "attackrank": "attackrank", "rank": "attackrank", "surface": "attackrank",
+        "acunetix": "acunetix",
     }
     scan = SCAN_ALIASES.get(scan)
     if not scan:

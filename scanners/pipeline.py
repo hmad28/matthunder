@@ -273,24 +273,46 @@ def phase3(domain, live_hosts):
     print(f"  {M}{BD}PHASE 3: CONTENT DISCOVERY{RST}")
     print(f"  {M}{'='*55}{RST}")
 
-    # Historical URLs
-    _log("P3", "Historical URL harvest (gau/waybackurls)...")
-    gau = _find_bin("gau")
     urls = set()
+
+    # Strategy 1: gau with blacklist (fast — skips images/CSS/fonts)
+    gau = _find_bin("gau")
     if gau:
-        stdout, stderr, rc = _run_cmd([gau, "--subs", domain], timeout=300, label="gau")
-        if rc == 0:
+        _log("P3", "Historical URL harvest (gau)...")
+        stdout, stderr, rc = _run_cmd(
+            [gau, "--subs", "--threads", "5",
+             "--blacklist", "png,jpg,jpeg,gif,css,svg,woff,woff2,ttf,eot,otf,ico",
+             domain],
+            timeout=180, label="gau",
+        )
+        if rc == 0 and stdout.strip():
             urls = set(l.strip() for l in stdout.splitlines() if l.strip().startswith("http"))
+            _log("P3", f"gau found {len(urls)} URLs", G)
         else:
-            _log("P3", f"gau failed (rc={rc}), trying without --subs...", Y)
-            stdout2, _, _ = _run_cmd([gau, domain], timeout=120, label="gau-simple")
-            urls = set(l.strip() for l in stdout2.splitlines() if l.strip().startswith("http"))
+            _log("P3", f"gau failed/timed out, trying waybackurls...", Y)
+
+    # Strategy 2: waybackurls fallback
     if not urls:
         wayback = _find_bin("waybackurls")
         if wayback:
             _log("P3", "Trying waybackurls...")
-            stdout, _, _ = _run_cmd([wayback, domain], timeout=120, label="waybackurls")
-            urls = set(l.strip() for l in stdout.splitlines() if l.strip().startswith("http"))
+            stdout, _, rc = _run_cmd([wayback, domain], timeout=120, label="waybackurls")
+            if rc == 0 and stdout.strip():
+                urls = set(l.strip() for l in stdout.splitlines() if l.strip().startswith("http"))
+                _log("P3", f"waybackurls found {len(urls)} URLs", G)
+
+    # Strategy 3: Extract URLs from live hosts via httpx + link extraction
+    if not urls and live_hosts:
+        _log("P3", "Extracting URLs from live hosts (httpx crawl)...", Y)
+        urls = _crawl_live_hosts_for_urls(live_hosts[:20], domain)
+        _log("P3", f"Live host crawl found {len(urls)} URLs", G if urls else Y)
+
+    # Strategy 4: If still nothing, use httpx to check common paths
+    if not urls:
+        _log("P3", "Probing common paths on live hosts...", Y)
+        urls = _probe_common_paths(live_hosts[:10] if live_hosts else [domain], domain)
+        _log("P3", f"Common path probe found {len(urls)} URLs", G if urls else Y)
+
     _log("P3", f"Historical URLs: {len(urls)}", G if urls else Y)
 
     # JS Analysis
@@ -314,6 +336,86 @@ def phase3(domain, live_hosts):
     return list(urls)
 
 
+def _crawl_live_hosts_for_urls(hosts: list[str], domain: str) -> set[str]:
+    """Crawl live hosts and extract URLs with parameters."""
+    urls = set()
+    try:
+        import httpx as _httpx
+        with _httpx.Client(
+            headers={"User-Agent": "matthunder/1.4"},
+            follow_redirects=True, timeout=10.0
+        ) as client:
+            for host in hosts:
+                for scheme in ("https", "http"):
+                    base = f"{scheme}://{host}"
+                    try:
+                        r = client.get(base, timeout=10.0)
+                        if r.status_code >= 400:
+                            continue
+                        # Extract href/src/action links
+                        import re
+                        links = re.findall(r'(?:href|src|action)=["\']([^"\'#]+)', r.text, re.I)
+                        for link in links:
+                            from urllib.parse import urljoin, urlparse
+                            full = urljoin(base, link)
+                            parsed = urlparse(full)
+                            if parsed.netloc and domain in parsed.netloc and parsed.query:
+                                urls.add(full)
+                        # Also add the base URL if it has params
+                        if "?" in str(r.url):
+                            urls.add(str(r.url))
+                    except Exception:
+                        continue
+    except Exception:
+        pass
+    return urls
+
+
+def _probe_common_paths(hosts: list[str], domain: str) -> set[str]:
+    """Probe common paths and return URLs with params for testing."""
+    urls = set()
+    common_paths = [
+        "/search", "/api/search", "/api/v1/search", "/login",
+        "/admin", "/api/users", "/api/items", "/profile",
+        "/page", "/redirect", "/q", "/find", "/api/query",
+        "/contact", "/feedback", "/api/login",
+    ]
+    common_params = ["id", "q", "search", "query", "page", "user",
+                     "name", "email", "redirect", "url", "file"]
+
+    try:
+        import httpx as _httpx
+        with _httpx.Client(
+            headers={"User-Agent": "matthunder/1.4"},
+            follow_redirects=True, timeout=8.0
+        ) as client:
+            for host in hosts[:5]:
+                for scheme in ("https", "http"):
+                    base = f"{scheme}://{host}"
+                    for path in common_paths:
+                        url = f"{base}{path}"
+                        try:
+                            r = client.get(url, timeout=5.0)
+                            if r.status_code in (200, 301, 302):
+                                # Add with common params
+                                for param in common_params[:5]:
+                                    urls.add(f"{url}?{param}=test")
+                                # Also check if response has forms
+                                import re
+                                form_inputs = re.findall(
+                                    r'<(?:input|select|textarea)[^>]+name=["\']([^"\']+)["\']',
+                                    r.text[:50000], re.I,
+                                )
+                                for inp in form_inputs[:5]:
+                                    if len(inp) < 30:
+                                        urls.add(f"{url}?{inp}=test")
+                        except Exception:
+                            continue
+    except Exception:
+        pass
+    return urls
+
+
 # ─── Phase 4: Automated Scanning ────────────────────────────────────────────
 
 def phase4(domain, live_hosts, urls):
@@ -324,24 +426,40 @@ def phase4(domain, live_hosts, urls):
     nuclei = _find_bin("nuclei")
     nuclei_count = 0
 
-    # Scan 1: Live hosts with nuclei templates
+    # Scan 1: Live hosts — focused templates first (misconfig/exposure, fast)
     if nuclei and live_hosts:
-        _log("P4", f"Nuclei scanning {min(len(live_hosts), 30)} live hosts...")
-        targets = live_hosts[:30] if live_hosts != [domain] else [domain]
+        hosts_to_scan = min(10, len(live_hosts))
+        _log("P4", f"Nuclei scanning {hosts_to_scan} live hosts...")
+        targets = live_hosts[:hosts_to_scan] if live_hosts != [domain] else [domain]
         tmp = f"_mt_pipe_{domain}_nuclei.txt"
         with open(tmp, "w") as f:
             f.write("\n".join(targets))
-        stdout, stderr, rc = _run_cmd(
-            [nuclei, "-l", tmp, "-silent", "-severity", "low,medium,high,critical",
-             "-rate-limit", "100", "-timeout", "5"],
-            timeout=900, label="nuclei",
-        )
-        if stdout.strip():
-            nuclei_count = len([l for l in stdout.splitlines() if l.strip()])
-            # Print first 10 findings
-            for line in stdout.splitlines()[:10]:
-                if line.strip():
-                    _log("P4", f"  {line.strip()}", G)
+
+        # Run focused template groups sequentially to avoid timeout
+        template_groups = [
+            ("technologies,exposures,misconfiguration", "exposure+misconfig", 240),
+            ("cves,default-logins,panels", "cves+panels", 240),
+            ("xss,sqli,lfi,ssrf,ssti,crlf", "injection", 240),
+        ]
+        for tags, label, timeout_val in template_groups:
+            stdout, stderr, rc = _run_cmd(
+                [nuclei, "-l", tmp, "-silent", "-tags", tags,
+                 "-rate-limit", "50", "-timeout", "10", "-c", "20",
+                 "-duc", "-ni"],
+                timeout=timeout_val, label=f"nuclei-{label}",
+            )
+            if rc == -1:  # timeout
+                _log("P4", f"nuclei-{label}: timed out ({timeout_val}s), skipping", Y)
+                continue
+            if stdout.strip():
+                count = len([l for l in stdout.splitlines() if l.strip()])
+                nuclei_count += count
+                for line in stdout.splitlines()[:10]:
+                    if line.strip():
+                        _log("P4", f"  {line.strip()}", G)
+                if count > 0:
+                    _log("P4", f"nuclei-{label}: {count} findings", G)
+
         try:
             os.remove(tmp)
         except OSError:
@@ -351,16 +469,19 @@ def phase4(domain, live_hosts, urls):
     if nuclei and urls and len(urls) > 0:
         param_urls = [u for u in urls if "?" in u and "=" in u]
         if param_urls:
+            batch_size = 200
             _log("P4", f"Nuclei scanning {min(len(param_urls), 500)} historical URLs with params...")
             tmp_urls = f"_mt_pipe_{domain}_urls.txt"
             with open(tmp_urls, "w") as f:
                 f.write("\n".join(param_urls[:500]))
-            stdout2, _, _ = _run_cmd(
-                [nuclei, "-l", tmp_urls, "-silent", "-severity", "low,medium,high,critical",
-                 "-rate-limit", "100", "-timeout", "5"],
-                timeout=900, label="nuclei-urls",
+            stdout2, _, rc2 = _run_cmd(
+                [nuclei, "-l", tmp_urls, "-silent", "-tags", "xss,sqli,lfi,ssrf,ssti,crlf",
+                 "-rate-limit", "50", "-timeout", "10", "-c", "25"],
+                timeout=600, label="nuclei-urls",
             )
-            if stdout2.strip():
+            if rc2 == -1:
+                _log("P4", "nuclei-urls: timed out (600s)", Y)
+            elif stdout2.strip():
                 url_findings = len([l for l in stdout2.splitlines() if l.strip()])
                 nuclei_count += url_findings
                 _log("P4", f"Nuclei URL scan: {url_findings} additional findings", G if url_findings else D)
@@ -390,7 +511,24 @@ def phase5(domain, urls):
 
     # Show URL stats
     param_urls = [u for u in urls if "?" in u and "=" in u]
+    # Dedupe by base URL, keep most param-rich sample
+    seen = {}
+    for u in param_urls:
+        base = u.split("?", 1)[0]
+        if base not in seen or len(u) > len(seen[base]):
+            seen[base] = u
+    param_urls = list(seen.values())
     _log("P5", f"URLs with params: {len(param_urls)} (from {len(urls)} total)")
+
+    # Store discovered URLs in a temp file for scanners to use
+    url_file = os.path.join("results", f"{domain}_pipeline_urls.txt")
+    os.makedirs("results", exist_ok=True)
+    # Cap param URLs to keep runtime sane
+    MAX_P5 = 2000
+    with open(url_file, "w", encoding="utf-8") as f:
+        for u in param_urls[:MAX_P5]:
+            f.write(u + "\n")
+    _log("P5", f"Saved {min(len(param_urls), MAX_P5)} param URLs → {url_file}", D)
 
     vulns = [
         ("sqli",         "SQL Injection"),
@@ -405,17 +543,27 @@ def phase5(domain, urls):
     total = 0
     for key, label in vulns:
         _log("P5", f"Running {label}...")
+        # Pass pipeline_urls env var so scanners can use pre-discovered URLs
+        os.environ["MT_PIPELINE_URLS"] = url_file
+        os.environ["MT_PIPELINE_DOMAIN"] = domain
         result = _run_scanner(key, domain, label)
+        os.environ.pop("MT_PIPELINE_URLS", None)
+        os.environ.pop("MT_PIPELINE_DOMAIN", None)
         count = result.get("findings", 0)
         total += count
         if count > 0:
             _log("P5", f"  {label}: {count} HITS!", G)
-            # Show details
             for k in ("endpoints", "params", "probes"):
                 if k in result and result[k]:
                     _log("P5", f"    {k}: {result[k]}", G)
         else:
             _log("P5", f"  {label}: 0", D)
+
+    # Cleanup
+    try:
+        os.remove(url_file)
+    except OSError:
+        pass
 
     return total
 

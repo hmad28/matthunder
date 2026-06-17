@@ -252,6 +252,83 @@ os.makedirs(OUTPUT_FOLDER_SUBDO, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER_ACTIVE, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER_NUCLEI, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER_CRAWLED, exist_ok=True)
+def _run_post_nuclei_dast(target: str, param_output: str, active_file: str, scan_args: list):
+    """Run Dalfox XSS + Sqlmap SQLi on parameterized URLs.
+
+    Runs as a background thread so takeover (and the rest of the scan pipeline)
+    can continue in parallel. Stdout goes to bot_logs/dast_<target>.log.
+    """
+    if not os.path.exists(param_output):
+        print("[!] Post-nuclei DAST skipped: no param_urls file")
+        return
+    # Count param URLs
+    try:
+        n_urls = sum(1 for _ in open(param_output, 'r', encoding='utf-8', errors='ignore') if _.strip())
+    except Exception:
+        n_urls = 0
+    if n_urls == 0:
+        print("[!] Post-nuclei DAST skipped: param_urls file empty")
+        return
+    print(f"\n\033[94m[+]\033[0m \033[94mPost-nuclei DAST: {n_urls} parameterized URLs (background)\033[0m")
+
+    def _run_dast():
+        os.environ["MT_PIPELINE_URLS"] = param_output
+        log_dir = ROOT / "bot_logs"
+        log_dir.mkdir(exist_ok=True)
+        dast_log = log_dir / f"dast_{target}.log"
+        # Also write progress to the main scan log so the bot's status parser
+        # can see DAST progress without watching a separate file.
+        # Use the live scan log path from os.environ if available.
+        main_log_path = os.environ.get("MATTHUNDER_SCAN_LOG", "")
+        def w(line):
+            lf.write(line + "\n"); lf.flush()
+            if main_log_path:
+                try:
+                    with open(main_log_path, "a", encoding="utf-8", errors="replace") as m:
+                        m.write(line + "\n")
+                except Exception:
+                    pass
+            # Also print to stdout (so it shows in run_bot.log too)
+            print(line)
+        try:
+            with open(dast_log, "w", encoding="utf-8", errors="replace") as lf:
+                # Stage 1: Dalfox XSS
+                w(f"[Stage 1/2] Dalfox XSS scan starting ({n_urls} URLs)")
+                try:
+                    from scanners.xss import run as xss_run
+                    xss_res = xss_run(target)
+                    if xss_res.get("ok") is False:
+                        w(f"[!] Dalfox failed: {xss_res.get('error','?')[:200]}")
+                    else:
+                        n = xss_res.get("findings") or xss_res.get("total_links") or 0
+                        w(f"[✓] Dalfox completed — {n} XSS findings")
+                except Exception as e:
+                    w(f"[!] Dalfox error: {e}")
+                # Stage 2: Sqlmap SQLi
+                w(f"[Stage 2/2] Sqlmap SQLi scan starting")
+                try:
+                    from scanners.sqli import run as sqli_run
+                    sqli_res = sqli_run(target)
+                    if sqli_res.get("ok") is False:
+                        w(f"[!] Sqlmap failed: {sqli_res.get('error','?')[:200]}")
+                    else:
+                        n = sqli_res.get("findings") or sqli_res.get("total_links") or 0
+                        w(f"[✓] Sqlmap completed — {n} SQLi findings")
+                except Exception as e:
+                    w(f"[!] Sqlmap error: {e}")
+                w("[done] Post-nuclei DAST finished")
+        except Exception as e:
+            try:
+                with open(dast_log, "a", encoding="utf-8", errors="replace") as lf:
+                    lf.write(f"[fatal] {e}\n")
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_run_dast, daemon=True)
+    t.start()
+    print(f"  ↳ Dalfox + Sqlmap jalan di background. Log: `bot_logs/dast_{target}.log`")
+
+
 os.makedirs(OUTPUT_FOLDER_SENSITIVE_DATA, exist_ok=True)
 LOCAL_VERSION = "1.4"
 def get_status_version():
@@ -1370,8 +1447,13 @@ def nuclei_without_parameter(target, input_file, output_file, user_agent, scan_a
         return
     try:
         def nuclei_basic_scan():
+            # Quick mode: CVEs + default-logins only (~500 templates, much faster)
+            if os.getenv("MATTHUNDER_QUICK_MODE") == "1":
+                tags = "cves,default-logins,panels,misconfiguration"
+            else:
+                tags = "misconfiguration,exposure,default-login,panel,cves,tech,cms,files,dns,takeover,ssl,token,fuzz,backup,git,iot,xss"
             return subprocess.Popen([
-                resolve_tool("nuclei"), "-l", input_file, "-nh", "-s", "low,medium,high,critical", "-tags", "misconfiguration,exposure,default-login,panel,cves,tech,cms,files,dns,takeover,ssl,token,fuzz,backup,git,iot,xss", "-ept", "ssl", "-timeout", "5", "-retries", "1", *scan_args, "-o", output_file
+                resolve_tool("nuclei"), "-l", input_file, "-nh", "-s", "low,medium,high,critical", "-tags", tags, "-ept", "ssl", "-timeout", "5", "-retries", "1", *scan_args, "-o", output_file
             ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8", errors="replace", bufsize=1)
         run_with_animation("Nuclei (Basic scan)", nuclei_basic_scan)
     except subprocess.CalledProcessError as e:
@@ -1722,7 +1804,7 @@ def dark_deep_target(mode, target, resume=False):
                 hours, remaining = divmod(int(scan_duration), 3600)
                 minutes, seconds = divmod(remaining, 60)
                 print(f"[⏱️] Nuclei scanning process completed in {hours} hours {minutes} minutes {seconds} seconds")
-            elif os.path.exists(crawled_filtered_output):
+            elif os.path.exists(katana_output) or os.path.exists(gau_output) or os.path.exists(wayback_output):
                 total_count = sum(1 for line in open(subdomain_file, 'r', encoding='utf-8', errors='ignore') if line.strip()) if os.path.exists(subdomain_file) else 0
                 print(f"\033[93m[✓]\033[0m \033[94mSuccessfully found \033[93m{total_count}\033[94m subdomains\033[0m")
 
@@ -1998,9 +2080,15 @@ def dark_deep_target(mode, target, resume=False):
                 nuclei_param_dast(target, param_output, nuclei_output_param, user_agent, scan_args)
             elif mode == "deep":
                 nuclei_without_parameter(target, active_file, nuclei_output_httpx, user_agent, scan_args)
-                nuclei_js_exposure(target, js_output, nuclei_output_js, user_agent, scan_args)
-                nuclei_param_dast(target, param_output, nuclei_output_param, user_agent, scan_args)
-                nuclei_takeover(subdomain_file, output_path_takeover, target)
+                if os.getenv("MATTHUNDER_QUICK_MODE") != "1":
+                    nuclei_js_exposure(target, js_output, nuclei_output_js, user_agent, scan_args)
+                    nuclei_param_dast(target, param_output, nuclei_output_param, user_agent, scan_args)
+                    # Post-nuclei DAST runs in BACKGROUND (parallel with takeover)
+                    if os.getenv("MATTHUNDER_SKIP_DAST") != "1":
+                        _run_post_nuclei_dast(target, param_output, active_file, scan_args)
+                    nuclei_takeover(subdomain_file, output_path_takeover, target)
+                else:
+                    print("[!] Quick mode: skipping JS / DAST / takeover scans (CVE + default-login only)")
             else:
                 print(f"[!] Unknown scan mode: {mode}")
                 return
@@ -2046,7 +2134,7 @@ def dark_deep(mode):
         print(f"\033[92m[⏱️] Successfully collected URLs from {target} for "
             f"\033[93m{hours}\033[92m hours "
             f"\033[93m{minutes}\033[92m minutes "
-            f"\033[93m{seconds}\033[92m seconds\033[0m")        
+            f"\033[93m{seconds}\033[92m seconds\033[0m")
         start_time_nuclei_scan = time.time()
         if mode == "dark":
             nuclei_js_exposure(target, js_output, nuclei_output_js, user_agent, scan_args)
@@ -2055,6 +2143,9 @@ def dark_deep(mode):
             nuclei_without_parameter(target, active_file, nuclei_output_httpx, user_agent, scan_args)
             nuclei_js_exposure(target, js_output, nuclei_output_js, user_agent, scan_args)
             nuclei_param_dast(target, param_output, nuclei_output_param, user_agent, scan_args)
+            # Post-nuclei DAST in background, parallel with takeover
+            if os.getenv("MATTHUNDER_SKIP_DAST") != "1":
+                _run_post_nuclei_dast(target, param_output, active_file, scan_args)
             nuclei_takeover(subdomain_file, output_path_takeover, target)
         else:
             print(f"[!] Unknown scan mode: {mode}")
