@@ -28,6 +28,8 @@ from .api import scans as scans_api
 from .api import targets as targets_api
 from .api import results as results_api
 from .api import config as config_api
+from .api import acunetix as acunetix_api
+from .api import ai as ai_api
 
 DESCRIPTION = """
 # matthunder Web Interface
@@ -67,6 +69,8 @@ app.include_router(scans_api.router)
 app.include_router(targets_api.router)
 app.include_router(results_api.router)
 app.include_router(config_api.router)
+app.include_router(acunetix_api.router)
+app.include_router(ai_api.router)
 
 # ── Static files (single-page frontend) ─────────────────────────
 
@@ -105,5 +109,12 @@ async def api_root():
             "GET  /api/results/nuclei": "Nuclei results",
             "GET  /api/results/reports": "Generated report files",
             "GET  /api/config/": "Current configuration",
+        "GET  /api/acunetix/status": "Acunetix connection status",
+        "GET  /api/acunetix/targets": "Acunetix targets list",
+        "GET  /api/acunetix/scans": "Acunetix scan history",
+        "GET  /api/acunetix/vulns": "Acunetix vulnerabilities",
+        "GET  /api/acunetix/vulns/{scan_id}": "Vulns by scan ID",
+        "GET  /api/ai/providers": "AI provider list + config status",
+        "POST /api/ai/analyze": "AI-powered analysis",
         },
     }

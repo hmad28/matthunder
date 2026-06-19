@@ -2,506 +2,986 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>matthunder Web</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>matthunder — Web Interface</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>⚡</text></svg>">
 <style>
-:root{color-scheme:dark;--bg:#1e1e1e;--panel:#252526;--panel-2:#2d2d30;--border:#3c3c3c;--muted:#9aa0a6;--text:#d4d4d4;--strong:#f3f3f3;--blue:#4aa5ff;--green:#6fcf97;--yellow:#d7ba7d;--red:#f48771;--focus:#007acc;--terminal:#111}
+/* ═══════════════════════ DESIGN SYSTEM ═══════════════════════ */
+:root {
+  --bg: #0d1117; --bg-2: #161b22; --bg-3: #1c2128;
+  --panel: #21262d; --panel-2: #30363d; --border: #30363d;
+  --text: #e6edf3; --text-2: #8b949e; --text-3: #484f58;
+  --blue: #58a6ff; --blue-bg: rgba(56,139,253,0.1);
+  --green: #3fb950; --green-bg: rgba(46,160,67,0.1);
+  --yellow: #d29922; --yellow-bg: rgba(187,128,9,0.1);
+  --red: #f85149; --red-bg: rgba(248,81,73,0.1);
+  --purple: #bc8cff; --orange: #d4760a;
+  --radius: 8px; --radius-sm: 4px;
+  --font: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+  --mono: 'SF Mono','Fira Code','Cascadia Code',Consolas,monospace;
+  --sidebar: 240px; --topbar: 56px;
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:"Segoe UI",system-ui,sans-serif;font-size:14px;min-height:100vh;display:flex}
-/* ─── sidebar ─── */
-nav{width:220px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
-nav .logo{padding:20px 16px 12px;font-size:18px;font-weight:700;color:var(--strong);border-bottom:1px solid var(--border)}
-nav .logo span{color:var(--blue)}
-nav .nav-items{flex:1;overflow-y:auto}
-nav .nav-item{padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;color:var(--muted);border-left:3px solid transparent;transition:all .15s}
-nav .nav-item:hover{background:var(--panel-2);color:var(--text)}
-nav .nav-item.active{background:var(--panel-2);color:var(--strong);border-left-color:var(--blue)}
-nav .nav-item .icon{width:20px;text-align:center;font-size:16px}
-nav .status-bar{padding:12px 16px;border-top:1px solid var(--border);font-size:12px}
-nav .status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
-nav .status-dot.idle{background:var(--muted)}
-nav .status-dot.running{background:var(--green);animation:pulse 1.2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-/* ─── main ─── */
-main{flex:1;display:flex;flex-direction:column;overflow:hidden}
-.topbar{height:48px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;flex-shrink:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+/* ═══ scrollbar ═══ */
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--panel-2);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--text-3)}
+/* ═══ app shell ═══ */
+.app{display:flex;min-height:100vh}
+/* ═══ sidebar ═══ */
+.sidebar{width:var(--sidebar);background:var(--bg-2);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;position:sticky;top:0;height:100vh;overflow:hidden}
+.sidebar .brand{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.sidebar .brand .logo{font-size:20px;font-weight:700;color:var(--text)}
+.sidebar .brand .logo span{color:var(--blue)}
+.sidebar .brand .version{font-size:11px;color:var(--text-2);margin-left:auto}
+.sidebar .nav{padding:8px 0;flex:1;overflow-y:auto}
+.sidebar .nav-group{padding:8px 16px 4px;font-size:11px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.8px}
+.sidebar .nav-item{display:flex;align-items:center;gap:10px;padding:8px 20px;cursor:pointer;color:var(--text-2);transition:all .12s;border-left:3px solid transparent;text-decoration:none}
+.sidebar .nav-item:hover{background:var(--bg-3);color:var(--text)}
+.sidebar .nav-item.active{background:var(--blue-bg);color:var(--blue);border-left-color:var(--blue);font-weight:500}
+.sidebar .nav-item .icon{width:20px;text-align:center;font-size:15px;flex-shrink:0}
+.sidebar .status-bar{padding:12px 20px;border-top:1px solid var(--border);font-size:12px;display:flex;align-items:center;gap:8px}
+.sidebar .status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.sidebar .status-dot.idle{background:var(--text-3)}
+.sidebar .status-dot.running{background:var(--green);box-shadow:0 0 6px var(--green)}
+.sidebar .status-dot.error{background:var(--red)}
+/* ═══ main ═══ */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:100vh}
+.topbar{height:var(--topbar);background:var(--bg-2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 24px;flex-shrink:0;gap:12px}
 .topbar h2{font-size:16px;font-weight:600}
-.content{flex:1;overflow-y:auto;padding:20px}
-/* ─── cards ─── */
-.card{background:var(--panel);border:1px solid var(--border);border-radius:6px;margin-bottom:16px}
-.card-header{padding:12px 16px;border-bottom:1px solid var(--border);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
-.card-body{padding:16px}
-.card-body>:not(:last-child){margin-bottom:12px}
-/* ─── forms ─── */
-input,select,button{font-family:inherit;font-size:14px}
-input,select{background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:4px;outline:none;width:100%;transition:border-color .15s}
-input:focus,select:focus{border-color:var(--focus)}
-select{cursor:pointer}
-button{background:var(--blue);color:#fff;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-weight:500;transition:opacity .15s}
-button:hover{opacity:.85}
-button:disabled{opacity:.4;cursor:not-allowed}
-button.danger{background:var(--red)}
-button.secondary{background:var(--panel-2);color:var(--text);border:1px solid var(--border)}
-.btn-group{display:flex;gap:8px;flex-wrap:wrap}
-/* ─── grid ─── */
+.topbar .breadcrumb{color:var(--text-2);font-size:13px}
+.topbar .breadcrumb span{color:var(--text-2)}
+.topbar .breadcrumb .current{color:var(--text)}
+.content{flex:1;overflow-y:auto;padding:24px}
+/* ═══ cards ═══ */
+.card{background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:16px}
+.card-header{padding:14px 20px;border-bottom:1px solid var(--border);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px}
+.card-header .badge{margin-left:auto}
+.card-body{padding:20px}
+.card-body>:not(:last-child){margin-bottom:14px}
+/* ═══ grid ═══ */
 .row{display:flex;gap:16px;flex-wrap:wrap}
 .col{flex:1;min-width:280px}
-/* ─── table ─── */
+.col-3{flex:0 0 calc(33.33% - 11px);min-width:220px}
+/* ═══ forms ═══ */
+input,select,textarea,button{font-family:var(--font);font-size:14px;outline:none}
+input,select,textarea{background:var(--bg-3);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:var(--radius-sm);width:100%;transition:border-color .15s}
+input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-bg)}
+textarea{resize:vertical;min-height:80px;font-family:var(--mono);font-size:13px}
+.input-group{display:flex;gap:8px}
+.input-group input{flex:1}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:none;border-radius:var(--radius-sm);cursor:pointer;font-weight:500;transition:all .12s;white-space:nowrap}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn:not(:disabled):hover{opacity:.85}
+.btn-primary{background:var(--blue);color:#fff}
+.btn-primary:not(:disabled):hover{background:#4c96e8}
+.btn-danger{background:var(--red);color:#fff}
+.btn-success{background:var(--green);color:#fff}
+.btn-warning{background:var(--yellow);color:#000}
+.btn-secondary{background:var(--panel);color:var(--text);border:1px solid var(--border)}
+.btn-secondary:hover{background:var(--panel-2)}
+.btn-sm{padding:4px 10px;font-size:12px}
+.btn-lg{padding:10px 24px;font-size:15px}
+.btn-group{display:flex;gap:8px;flex-wrap:wrap}
+/* ═══ tables ═══ */
+.table-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)}
-th{color:var(--muted);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.5px}
-tr:hover td{background:var(--panel-2)}
-/* ─── terminal ─── */
-.terminal{background:var(--terminal);border:1px solid var(--border);border-radius:4px;font-family:"Cascadia Code","Fira Code","Consolas",monospace;font-size:12px;padding:12px;max-height:400px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
-.terminal .line{color:var(--green)}
+th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border)}
+th{color:var(--text-2);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;background:var(--bg-3)}
+tr:hover td{background:var(--bg-3)}
+td .text-muted{color:var(--text-2)}
+/* ═══ badges ═══ */
+.badge{display:inline-flex;align-items:center;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600;gap:4px}
+.badge-critical{background:var(--red-bg);color:var(--red);border:1px solid rgba(248,81,73,.3)}
+.badge-high{background:var(--red-bg);color:var(--orange)}
+.badge-medium{background:var(--yellow-bg);color:var(--yellow)}
+.badge-low{background:var(--blue-bg);color:var(--blue)}
+.badge-info{background:rgba(56,139,253,.08);color:var(--blue)}
+.badge-success{background:var(--green-bg);color:var(--green)}
+.badge-warning{background:var(--yellow-bg);color:var(--yellow)}
+.badge-neutral{background:var(--panel-2);color:var(--text-2)}
+/* ═══ terminal / log ═══ */
+.terminal{background:#040a13;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--mono);font-size:12px;padding:14px;max-height:500px;overflow-y:auto;line-height:1.5}
+.terminal .line{padding:1px 0;color:var(--green);word-break:break-all}
 .terminal .line.info{color:var(--blue)}
 .terminal .line.warn{color:var(--yellow)}
 .terminal .line.error{color:var(--red)}
-.terminal .line.muted{color:var(--muted)}
-/* ─── badges ─── */
-.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
-.badge.blue{background:#1a3a5c;color:var(--blue)}
-.badge.green{background:#1a3a2a;color:var(--green)}
-.badge.yellow{background:#3a3a1a;color:var(--yellow)}
-.badge.red{background:#3a1a1a;color:var(--red)}
-/* ─── misc ─── */
+.terminal .line.muted{color:var(--text-3)}
+.terminal .line.highlight{background:rgba(56,139,253,.08);padding:2px 6px;border-radius:2px}
+/* ═══ pipeline ═══ */
+.pipeline{display:flex;flex-direction:column;gap:0}
+.pipeline-step{display:flex;align-items:center;gap:14px;padding:12px 14px;border-left:3px solid var(--border);margin-left:12px;position:relative;transition:all .2s}
+.pipeline-step::before{content:'';position:absolute;left:-5px;top:50%;width:10px;height:10px;border-radius:50%;background:var(--panel-2);border:2px solid var(--border);transform:translateY(-50%)}
+.pipeline-step.done{border-left-color:var(--green)}
+.pipeline-step.done::before{background:var(--green);border-color:var(--green)}
+.pipeline-step.running{border-left-color:var(--blue)}
+.pipeline-step.running::before{background:var(--blue);border-color:var(--blue);animation:pulse 1.2s infinite}
+.pipeline-step.pending{opacity:.5}
+.pipeline-step .step-icon{width:28px;text-align:center;font-size:14px}
+.pipeline-step .step-label{font-weight:500}
+.pipeline-step .step-desc{font-size:12px;color:var(--text-2)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+/* ═══ stat cards ═══ */
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
+.stat-card{background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:16px;text-align:center}
+.stat-card .stat-value{font-size:28px;font-weight:700;color:var(--text)}
+.stat-card .stat-label{font-size:12px;color:var(--text-2);margin-top:4px}
+/* ═══ tabs ═══ */
+.tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:16px;gap:0}
+.tab{padding:10px 20px;cursor:pointer;color:var(--text-2);border-bottom:2px solid transparent;transition:all .12s;font-size:13px;font-weight:500}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+.tab-pane{display:none}
+.tab-pane.active{display:block}
+/* ═══ modal ═══ */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:none;align-items:center;justify-content:center;backdrop-filter:blur(2px)}
+.modal-overlay.open{display:flex}
+.modal{background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);width:90%;max-width:600px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,.4)}
+.modal-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;font-weight:600;font-size:15px}
+.modal-header .btn{position:absolute;top:12px;right:12px}
+.modal-body{padding:20px;overflow-y:auto;flex:1}
+.modal-footer{padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end}
+/* ═══ toast ═══ */
+.toast-container{position:fixed;top:16px;right:16px;z-index:2000;display:flex;flex-direction:column;gap:8px}
+.toast{background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 20px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.3);display:flex;align-items:center;gap:10px;animation:slideIn .2s ease;max-width:400px}
+.toast.success{border-left:3px solid var(--green)}
+.toast.error{border-left:3px solid var(--red)}
+.toast.info{border-left:3px solid var(--blue)}
+.toast.warning{border-left:3px solid var(--yellow)}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+/* ═══ misc ═══ */
 .hidden{display:none!important}
+.flex{display:flex;gap:8px;align-items:center}
+.flex-wrap{flex-wrap:wrap}
+.grow{flex:1}
 .text-center{text-align:center}
-.text-muted{color:var(--muted)}
+.text-right{text-align:right}
+.text-muted{color:var(--text-2)!important}
+.text-red{color:var(--red)}
+.text-green{color:var(--green)}
+.text-blue{color:var(--blue)}
 .mt-1{margin-top:12px}
 .mb-1{margin-bottom:12px}
-.flex{display:flex;gap:8px;align-items:center}
-.flex-1{flex:1}
-.loading{text-align:center;padding:40px;color:var(--muted)}
-.loading .spinner{display:inline-block;width:24px;height:24px;border:3px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite}
+.ml-auto{margin-left:auto}
+.gap-1{gap:12px}
+.loading{text-align:center;padding:40px;color:var(--text-2)}
+.loading .spinner{width:24px;height:24px;border:3px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;display:inline-block}
 @keyframes spin{to{transform:rotate(360deg)}}
-pre{font-family:inherit}
+.empty-state{text-align:center;padding:40px 20px;color:var(--text-2)}
+.empty-state .empty-icon{font-size:40px;margin-bottom:8px}
+pre{font-family:var(--mono);font-size:12px;line-height:1.5}
 a{color:var(--blue);text-decoration:none}
 a:hover{text-decoration:underline}
-/* ─── pipeline steps ─── */
-.pipeline-step{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
-.pipeline-step:last-child{border-bottom:none}
-.pipeline-step .step-status{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0}
-.pipeline-step.done .step-status{background:var(--green);color:#000}
-.pipeline-step.running .step-status{background:var(--blue);animation:pulse 1.2s infinite}
-.pipeline-step.pending .step-status{background:var(--panel-2);color:var(--muted)}
-.pipeline-step .step-label{flex:1}
-@media(max-width:768px){nav{width:60px}nav .logo{font-size:14px;padding:12px 8px}nav .nav-item{padding:12px 8px;justify-content:center}nav .nav-item span{display:none}nav .status-bar{font-size:10px;padding:8px}}
+code{background:var(--bg-3);padding:2px 6px;border-radius:3px;font-size:12px}
+.tag{display:inline-block;padding:1px 8px;border-radius:3px;font-size:11px;font-weight:500}
+.tag-blue{background:var(--blue-bg);color:var(--blue)}
+.tag-green{background:var(--green-bg);color:var(--green)}
+.tag-red{background:var(--red-bg);color:var(--red)}
+.tag-yellow{background:var(--yellow-bg);color:var(--yellow)}
+/* ═══ responsive ═══ */
+@media(max-width:768px){
+  .sidebar{width:60px}
+  .sidebar .brand .logo span,.sidebar .brand .version,.sidebar .nav-item span,.sidebar .nav-group{display:none}
+  .sidebar .nav-item{padding:10px;justify-content:center}
+  .sidebar .status-bar span{display:none}
+  .stat-grid{grid-template-columns:repeat(2,1fr)}
+  .row>.col{min-width:100%}
+}
 </style>
 </head>
 <body>
+<div class="app">
+  <!-- ═══ SIDEBAR ═══ -->
+  <nav class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="logo">mat<span>thunder</span></div>
+      <div class="version" id="sidebarVersion">v1.5</div>
+    </div>
+    <div class="nav">
+      <div class="nav-group">General</div>
+      <a class="nav-item active" data-page="dashboard"><span class="icon">📊</span><span>Dashboard</span></a>
+      <a class="nav-item" data-page="deepscan"><span class="icon">🚀</span><span>Deep Scan</span></a>
+      <a class="nav-item" data-page="scanners"><span class="icon">🔍</span><span>Scanners</span></a>
+      <a class="nav-item" data-page="pipeline"><span class="icon">🧬</span><span>Pipeline</span></a>
+      <div class="nav-group">Assets</div>
+      <a class="nav-item" data-page="targets"><span class="icon">🎯</span><span>Targets</span></a>
+      <a class="nav-item" data-page="results"><span class="icon">📈</span><span>Results</span></a>
+      <div class="nav-group">Integrations</div>
+      <a class="nav-item" data-page="acunetix"><span class="icon">🦅</span><span>Acunetix</span></a>
+      <a class="nav-item" data-page="ai"><span class="icon">🤖</span><span>AI Analysis</span></a>
+      <div class="nav-group">System</div>
+      <a class="nav-item" data-page="config"><span class="icon">⚙️</span><span>Config</span></a>
+    </div>
+    <div class="status-bar"><span class="status-dot idle" id="statusDot"></span><span id="statusLabel">Idle</span></div>
+  </nav>
 
-<!-- sidebar -->
-<nav id="sidebar">
-  <div class="logo">mat<span>thunder</span></div>
-  <div class="nav-items">
-    <div class="nav-item active" data-page="dashboard"><span class="icon">📊</span><span>Dashboard</span></div>
-    <div class="nav-item" data-page="deepscan"><span class="icon">🚀</span><span>Deep Scan</span></div>
-    <div class="nav-item" data-page="scanners"><span class="icon">🔍</span><span>Scanners</span></div>
-    <div class="nav-item" data-page="pipeline"><span class="icon">🧬</span><span>Pipeline</span></div>
-    <div class="nav-item" data-page="targets"><span class="icon">🎯</span><span>Targets</span></div>
-    <div class="nav-item" data-page="results"><span class="icon">📈</span><span>Results</span></div>
-    <div class="nav-item" data-page="config"><span class="icon">⚙️</span><span>Config</span></div>
+  <!-- ═══ MAIN ═══ -->
+  <div class="main">
+    <div class="topbar">
+      <h2 id="pageTitle">Dashboard</h2>
+      <div class="breadcrumb" id="breadcrumb"><span class="current">Overview</span></div>
+    </div>
+    <div class="content" id="pageContent"></div>
   </div>
-  <div class="status-bar"><span class="status-dot idle" id="statusDot"></span><span id="statusText">Idle</span></div>
-</nav>
+</div>
 
-<!-- main -->
-<main>
-  <div class="topbar"><h2 id="pageTitle">Dashboard</h2></div>
-  <div class="content" id="pageContent">
+<!-- ═══ TOAST CONTAINER ═══ -->
+<div class="toast-container" id="toastContainer"></div>
 
-    <!-- ─── Dashboard ─── -->
-    <div id="page-dashboard">
-      <div class="row">
-        <div class="col"><div class="card"><div class="card-header">📊 Quick Stats</div><div class="card-body" id="statsBody">
-          <div class="loading"><div class="spinner"></div></div>
-        </div></div></div>
-        <div class="col"><div class="card"><div class="card-header">🚀 Quick Actions</div><div class="card-body">
-          <button onclick="switchPage('deepscan')">🔍 Start Deep Scan</button>
-          <button class="secondary" onclick="switchPage('targets')" style="margin-top:8px">🎯 Manage Targets</button>
-          <button class="secondary" onclick="switchPage('scanners')" style="margin-top:8px">🔍 Run Scanner</button>
-        </div></div></div>
-      </div>
-      <div class="card"><div class="card-header">📋 Recent Scan History</div><div class="card-body" id="scanHistory">
-        <div class="loading"><div class="spinner"></div></div>
-      </div></div>
-    </div>
-
-    <!-- ─── Deep Scan ─── -->
-    <div id="page-deepscan" class="hidden">
-      <div class="row">
-        <div class="col"><div class="card"><div class="card-header">▶ Start Scan</div><div class="card-body">
-          <div class="flex" style="margin-bottom:12px">
-            <input id="scanTarget" placeholder="example.com" style="flex:1">
-            <select id="scanSpeed" style="width:120px">
-              <option value="low">Low</option>
-              <option value="standard" selected>Standard</option>
-              <option value="fast">Fast</option>
-            </select>
-          </div>
-          <div class="btn-group">
-            <button id="btnScanStart" onclick="startScan()">🚀 Start Deep Scan</button>
-            <button id="btnScanStop" class="danger" onclick="stopScan()" disabled>⛔ Stop</button>
-          </div>
-        </div></div></div>
-        <div class="col"><div class="card"><div class="card-header">📡 Status</div><div class="card-body">
-          <div id="scanStatus">Idle</div>
-        </div></div></div>
-      </div>
-      <div class="card"><div class="card-header">📜 Live Log</div><div class="card-body">
-        <div class="terminal" id="scanLog"><span class="line muted">Waiting for scan...</span></div>
-      </div></div>
-    </div>
-
-    <!-- ─── Scanners ─── -->
-    <div id="page-scanners" class="hidden">
-      <div class="row">
-        <div class="col"><div class="card"><div class="card-header">▶ Run Scanner</div><div class="card-body">
-          <select id="scannerSelect" style="margin-bottom:8px"></select>
-          <input id="scannerTarget" placeholder="example.com" style="margin-bottom:8px">
-          <button onclick="runInlineScanner()">🔍 Run Scanner</button>
-        </div></div></div>
-        <div class="col"><div class="card"><div class="card-header">📋 Available Scanners</div><div class="card-body" id="scannerList">
-          <div class="loading"><div class="spinner"></div></div>
-        </div></div></div>
-      </div>
-      <div class="card"><div class="card-header">📜 Scanner Output</div><div class="card-body">
-        <div class="terminal" id="scannerOutput"><span class="line muted">Run a scanner to see output...</span></div>
-      </div></div>
-    </div>
-
-    <!-- ─── Pipeline ─── -->
-    <div id="page-pipeline" class="hidden">
-      <div class="card"><div class="card-header">🧬 6-Phase Pipeline</div><div class="card-body">
-        <div class="flex" style="margin-bottom:12px">
-          <input id="pipelineTarget" placeholder="example.com" style="flex:1">
-          <button onclick="startPipeline()">▶ Start Pipeline</button>
-        </div>
-        <div id="pipelineSteps"></div>
-      </div></div>
-      <div class="card"><div class="card-header">📜 Pipeline Log</div><div class="card-body">
-        <div class="terminal" id="pipelineLog"><span class="line muted">Ready</span></div>
-      </div></div>
-    </div>
-
-    <!-- ─── Targets ─── -->
-    <div id="page-targets" class="hidden">
-      <div class="card"><div class="card-header">➕ Add Target</div><div class="card-body">
-        <div class="flex">
-          <input id="addTargetInput" placeholder="example.com" style="flex:1">
-          <button onclick="addTarget()">Add</button>
-        </div>
-      </div></div>
-      <div class="card"><div class="card-header">📋 Target List</div><div class="card-body" id="targetList">
-        <div class="loading"><div class="spinner"></div></div>
-      </div></div>
-    </div>
-
-    <!-- ─── Results ─── -->
-    <div id="page-results" class="hidden">
-      <div class="card"><div class="card-header">📋 Scan History</div><div class="card-body" id="resultsScans">
-        <div class="loading"><div class="spinner"></div></div>
-      </div></div>
-      <div class="card"><div class="card-header">📄 Nuclei Output</div><div class="card-body" id="resultsNuclei">
-        <div class="loading"><div class="spinner"></div></div>
-      </div></div>
-      <div class="card"><div class="card-header">📁 Reports</div><div class="card-body" id="resultsReports">
-        <div class="loading"><div class="spinner"></div></div>
-      </div></div>
-    </div>
-
-    <!-- ─── Config ─── -->
-    <div id="page-config" class="hidden">
-      <div class="card"><div class="card-header">⚙️ Configuration</div><div class="card-body" id="configBody">
-        <div class="loading"><div class="spinner"></div></div>
-      </div></div>
-      <div class="card"><div class="card-header">📁 Output Directories</div><div class="card-body" id="outputDirsBody">
-        <div class="loading"><div class="spinner"></div></div>
-      </div></div>
-    </div>
-
+<!-- ═══ MODAL ═══ -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-header" id="modalHeader">Title</div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-footer" id="modalFooter"></div>
   </div>
-</main>
+</div>
 
 <script>
+// ═══════════════════════════════════════════════════════════════════
+//  matthunder Web — Single-Page Application
+// ═══════════════════════════════════════════════════════════════════
+
 const API = window.location.origin;
 
-// ─── Navigation ────────────────────────────────────────────────
-function switchPage(name) {
-  document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.page === name));
-  document.querySelectorAll('.content>div[id^="page-"]').forEach(el => el.classList.add('hidden'));
-  const page = document.getElementById('page-'+name);
-  if (page) page.classList.remove('hidden');
-  const titles = {dashboard:'Dashboard',deepscan:'Deep Scan',scanners:'Inline Scanners',
-    pipeline:'Pipeline',targets:'Targets',results:'Results',config:'Configuration'};
-  document.getElementById('pageTitle').textContent = titles[name] || name;
+// ─── Helpers ──────────────────────────────────────────────────
+function $(id) { return document.getElementById(id); }
+function qs(s,e=document) { return e.querySelector(s); }
+function qsa(s,e=document) { return e.querySelectorAll(s); }
+function esc(t) { const d=document.createElement('div'); d.textContent=t; return d.innerHTML; }
+
+async function api(path, opts={}) {
+  const res = await fetch(API+path, {
+    headers: {'Content-Type':'application/json', ...opts.headers},
+    ...opts
+  });
+  if (opts.raw) return res;
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || data.error || res.statusText);
+  return data;
 }
-document.querySelectorAll('.nav-item').forEach(el => {
-  el.addEventListener('click', () => { switchPage(el.dataset.page); refreshPage(el.dataset.page); });
+
+function toast(msg, type='info', dur=4000) {
+  const c = $('toastContainer');
+  const el = document.createElement('div');
+  el.className = 'toast '+type;
+  el.innerHTML = `<span>${msg}</span>`;
+  c.appendChild(el);
+  setTimeout(() => { el.style.opacity='0'; el.style.transform='translateX(100px)'; el.style.transition='all .2s'; setTimeout(()=>el.remove(),200); }, dur);
+}
+
+function modal(title, bodyHtml, footerHtml='') {
+  $('modalHeader').textContent = title;
+  $('modalBody').innerHTML = bodyHtml;
+  $('modalFooter').innerHTML = footerHtml;
+  $('modalOverlay').classList.add('open');
+}
+function closeModal() { $('modalOverlay').classList.remove('open'); }
+$('modalOverlay').addEventListener('click', e => { if(e.target===e.currentTarget) closeModal(); });
+
+function loading(msg='Loading...') { return `<div class="loading"><div class="spinner"></div><div style="margin-top:12px">${msg}</div></div>`; }
+function emptyState(icon,msg) { return `<div class="empty-state"><div class="empty-icon">${icon}</div><div>${msg}</div></div>`; }
+
+function fmtDate(s) { if(!s) return '-'; try{ const d=new Date(s); return d.toLocaleString(); }catch(e){ return s; }}
+
+function severityBadge(sev) {
+  const map = {critical:'badge-critical',high:'badge-high',medium:'badge-medium',low:'badge-low',info:'badge-info'};
+  return `<span class="badge ${map[sev?.toLowerCase()]||'badge-neutral'}">${esc(sev||'unknown')}</span>`;
+}
+
+// ─── SPA Router ───────────────────────────────────────────────
+const PAGES = {};
+
+function switchPage(name) {
+  qsa('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.page===name));
+  const titles = {
+    dashboard:'Dashboard',deepscan:'Deep Scan',scanners:'Inline Scanners',pipeline:'Pipeline',
+    targets:'Targets',results:'Results',acunetix:'Acunetix',ai:'AI Analysis',config:'Configuration'
+  };
+  $('pageTitle').textContent = titles[name]||name;
+  $('breadcrumb').innerHTML = `<span>${titles[name]||name}</span>`;
+  const pageFn = PAGES[name];
+  if(pageFn) pageFn();
+}
+
+document.querySelectorAll('[data-page]').forEach(el => {
+  el.addEventListener('click', e => {
+    e.preventDefault();
+    switchPage(el.dataset.page);
+  });
 });
 
-function refreshPage(name) {
-  if (name === 'dashboard') loadDashboard();
-  if (name === 'scanners') loadScannerList();
-  if (name === 'targets') loadTargets();
-  if (name === 'results') loadResults();
-  if (name === 'config') loadConfig();
-}
-
-// ─── API helper ─────────────────────────────────────────────────
-async function api(path, opts={}) {
-  const res = await fetch(API+path, {headers:{'Content-Type':'application/json',...opts.headers},...opts});
-  if (opts.raw) return res;
-  return res.json();
-}
-
-// ─── Status poll ────────────────────────────────────────────────
+// ─── Status Poll ──────────────────────────────────────────────
 async function pollStatus() {
-  const s = await api('/api/scans/status');
-  const dot = document.getElementById('statusDot');
-  const txt = document.getElementById('statusText');
-  if (s.running) {
-    dot.className = 'status-dot running';
-    txt.textContent = s.target ? `Scan: ${s.target}` : 'Running';
-  } else {
-    dot.className = 'status-dot idle';
-    txt.textContent = 'Idle';
-  }
-  // Update scan page buttons
-  const btnStart = document.getElementById('btnScanStart');
-  const btnStop = document.getElementById('btnScanStop');
-  if (btnStart) { btnStart.disabled = s.running; }
-  if (btnStop) { btnStop.disabled = !s.running; }
-  if (!s.running && document.getElementById('scanStatus')) {
-    document.getElementById('scanStatus').innerHTML = `<span class="text-muted">Idle</span>`;
-  }
+  try {
+    const s = await api('/api/scans/status');
+    const dot = $('statusDot'), label = $('statusLabel');
+    if(s.running) {
+      dot.className = 'status-dot running';
+      label.textContent = s.target ? `Scan: ${s.target.slice(0,20)}` : 'Running';
+    } else {
+      dot.className = 'status-dot idle';
+      label.textContent = 'Idle';
+    }
+  } catch(e) {}
 }
 setInterval(pollStatus, 3000); pollStatus();
 
-// ─── Dashboard ──────────────────────────────────────────────────
-async function loadDashboard() {
+// ═══════════════════════════════════════════════════════════════
+//  PAGE: Dashboard
+// ═══════════════════════════════════════════════════════════════
+PAGES.dashboard = async function() {
+  const c = $('pageContent');
+  c.innerHTML = loading('Loading dashboard...');
   try {
-    const [status, history, nuclei, reports] = await Promise.all([
-      api('/api/scans/status'),
-      api('/api/results/scans?limit=5'),
-      api('/api/results/nuclei'),
-      api('/api/results/reports'),
-    ]);
-    document.getElementById('statsBody').innerHTML = `
-      <div class="flex"><span class="text-muted">Status:</span> ${status.running ? '<span class="badge green">Running</span>' : '<span class="badge blue">Idle</span>'} ${status.target ? `— ${status.target}` : ''}</div>
-      <div class="flex"><span class="text-muted">Scans in DB:</span> ${history.scans?.length || 0}</div>
-      <div class="flex"><span class="text-muted">Nuclei files:</span> ${nuclei.files?.length || 0}</div>
-      <div class="flex"><span class="text-muted">Reports:</span> ${reports.reports?.length || 0}</div>
-    `;
-    const tbody = document.getElementById('scanHistory');
-    if (!history.scans?.length) { tbody.innerHTML = '<div class="text-muted">No scan history yet.</div>'; return; }
-    let html = '<table><thead><tr><th>ID</th><th>Scanner</th><th>Domain</th><th>Status</th><th>Date</th></tr></thead><tbody>';
-    history.scans.forEach(s => {
-      html += `<tr><td>${(s.id||'').slice(0,8)}</td><td>${s.scanner||'-'}</td><td>${s.domain||'-'}</td>
-        <td><span class="badge ${s.status==='completed'?'green':s.status==='failed'?'red':s.status==='running'?'green':'yellow'}">${s.status||'-'}</span></td>
-        <td>${(s.created_at||'').slice(0,19).replace('T',' ')}</td></tr>`;
-    });
-    html += '</tbody></table>';
-    tbody.innerHTML = html;
-  } catch(e) { document.getElementById('statsBody').innerHTML = `<span class="text-muted">Error loading: ${e.message}</span>`; }
-}
+    let targets=[], history={scans:[]}, nuclei={files:[]}, reports={reports:[]};
+    try { const t=await api('/api/targets/'); targets=t.targets||[]; } catch(e){}
+    try { history=await api('/api/results/scans?limit=5'); } catch(e){}
+    try { nuclei=await api('/api/results/nuclei'); } catch(e){}
+    try { reports=await api('/api/results/reports'); } catch(e){}
 
-// ─── Deep Scan ──────────────────────────────────────────────────
-let scanWs = null;
+    const recentScans = (history.scans||[]).slice(0,5);
+    const totalFindings = recentScans.reduce((a,s)=>a+(s.total_links||0),0);
+
+    c.innerHTML = `
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-value">${targets.length}</div><div class="stat-label">Targets</div></div>
+      <div class="stat-card"><div class="stat-value">${recentScans.length}</div><div class="stat-label">Recent Scans</div></div>
+      <div class="stat-card"><div class="stat-value">${totalFindings}</div><div class="stat-label">Findings</div></div>
+      <div class="stat-card"><div class="stat-value">${(reports.reports||[]).length}</div><div class="stat-label">Reports</div></div>
+    </div>
+    <div class="row mt-1">
+      <div class="col">
+        <div class="card">
+          <div class="card-header">🚀 Quick Actions</div>
+          <div class="card-body">
+            <div class="btn-group">
+              <button class="btn btn-primary" onclick="switchPage('deepscan')">🔍 Start Deep Scan</button>
+              <button class="btn btn-secondary" onclick="switchPage('targets')">🎯 Manage Targets</button>
+              <button class="btn btn-secondary" onclick="switchPage('scanners')">🔍 Run Scanner</button>
+              <button class="btn btn-secondary" onclick="switchPage('acunetix')">🦅 Acunetix</button>
+              <button class="btn btn-secondary" onclick="switchPage('ai')">🤖 AI Analysis</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">📋 Recent Scans <span class="badge badge-neutral">${recentScans.length}</span></div>
+      <div class="card-body">
+        ${recentScans.length ? `<div class="table-wrap"><table><thead><tr><th>ID</th><th>Scanner</th><th>Domain</th><th>Status</th><th>Findings</th><th>Date</th></tr></thead><tbody>
+        ${recentScans.map(s=>`<tr><td><code>${(s.id||'').slice(0,8)}</code></td><td>${esc(s.scanner||'-')}</td><td>${esc(s.domain||'-')}</td>
+        <td><span class="tag ${s.status==='completed'?'tag-green':s.status==='running'?'tag-green':'tag-yellow'}">${s.status||'-'}</span></td>
+        <td>${s.total_links||0}</td><td>${fmtDate(s.created_at)}</td></tr>`).join('')}
+        </tbody></table></div>` : emptyState('📭','No scans yet. Start a deep scan or run a scanner.')}
+      </div>
+    </div>`;
+  } catch(e) { c.innerHTML = emptyState('❌','Error: '+esc(e.message)); }
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  PAGE: Deep Scan
+// ═══════════════════════════════════════════════════════════════
+let scanWs = null, scanRunning = false;
+let scanLogLines = 0;
+
+PAGES.deepscan = function() {
+  $('pageContent').innerHTML = `
+  <div class="row">
+    <div class="col">
+      <div class="card">
+        <div class="card-header">▶ Start Scan</div>
+        <div class="card-body">
+          <div class="input-group mb-1">
+            <input id="scanTarget" placeholder="example.com">
+            <select id="scanSpeed" style="width:140px">
+              <option value="low">🐢 Low</option>
+              <option value="standard" selected>⚡ Standard</option>
+              <option value="fast">🚀 Fast</option>
+            </select>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-primary btn-lg" id="btnScanStart" onclick="startScan()">🚀 Start Deep Scan</button>
+            <button class="btn btn-danger btn-lg" id="btnScanStop" onclick="stopScan()" disabled>⛔ Stop</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="card">
+        <div class="card-header">📡 Status</div>
+        <div class="card-body" id="scanStatusPanel">
+          <div style="padding:12px;background:var(--bg-3);border-radius:4px">
+            <div style="font-size:12px;color:var(--text-2)">
+              <div>Status: <strong id="scanStatusText" style="color:var(--text)">Idle</strong></div>
+              <div style="margin-top:4px">Target: <span id="scanStatusTarget" class="text-muted">—</span></div>
+              <div style="margin-top:4px">PID: <span id="scanStatusPid" class="text-muted">—</span></div>
+              <div style="margin-top:4px">Elapsed: <span id="scanStatusElapsed" class="text-muted">0s</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">📜 Live Output <span class="badge badge-neutral" id="logLineCount">0 lines</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="terminal" id="scanLog" style="max-height:600px;border-radius:0;border:none"><span class="line muted">Waiting for scan...</span></div>
+    </div>
+  </div>`;
+  pollDeepScanStatus();
+};
+
+async function pollDeepScanStatus() {
+  try {
+    const s = await api('/api/scans/status');
+    const btnStart = $('btnScanStart'), btnStop = $('btnScanStop');
+    const statusText = $('scanStatusText'), targetEl = $('scanStatusTarget');
+    const pidEl = $('scanStatusPid'), elapsedEl = $('scanStatusElapsed');
+
+    if(s.running) {
+      scanRunning = true;
+      if(btnStart) btnStart.disabled = true;
+      if(btnStop) btnStop.disabled = false;
+      if(statusText) { statusText.textContent = 'Running'; statusText.style.color = 'var(--green)'; }
+      if(targetEl) targetEl.textContent = s.target || '—';
+      if(pidEl) pidEl.textContent = s.pid || '—';
+      if(elapsedEl) elapsedEl.textContent = `${s.elapsed||0}s`;
+      setTimeout(pollDeepScanStatus, 2000);
+    } else {
+      if(scanRunning && btnStart) { btnStart.disabled = false; btnStop.disabled = true; }
+      scanRunning = false;
+      if(btnStart) btnStart.disabled = false;
+      if(btnStop) btnStop.disabled = true;
+      if(statusText) { statusText.textContent = 'Idle'; statusText.style.color = ''; }
+    }
+  } catch(e) { setTimeout(pollDeepScanStatus, 3000); }
+}
 
 async function startScan() {
-  const target = document.getElementById('scanTarget').value.trim();
-  const speed = document.getElementById('scanSpeed').value;
-  if (!target) return alert('Enter a target domain');
-  const statusDiv = document.getElementById('scanStatus');
-  const logDiv = document.getElementById('scanLog');
-  logDiv.innerHTML = '';
-  statusDiv.innerHTML = '<span class="text-muted">Starting scan...</span>';
+  const target = $('scanTarget').value.trim().toLowerCase();
+  const speed = $('scanSpeed').value;
+  if(!target) return toast('Enter a target domain','warning');
 
-  const res = await api('/api/scans/start', {method:'POST',body:JSON.stringify({target,speed})});
-  if (res.error) { statusDiv.innerHTML = `<span style="color:var(--red)">Error: ${res.error}</span>`; return; }
-  statusDiv.innerHTML = `▶ PID: ${res.pid} | Target: ${res.target}`;
+  const log = $('scanLog');
+  log.innerHTML = `<div class="line info">Starting deep scan: ${esc(target)} (${speed})...</div>`;
+  $('logLineCount').textContent = '1 line';
 
-  // Connect WebSocket for live log
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  scanWs = new WebSocket(proto + '//' + window.location.host + '/api/scans/ws/log');
-  scanWs.onmessage = e => {
-    const line = document.createElement('div');
-    line.className = 'line';
-    line.textContent = e.data;
-    logDiv.appendChild(line);
-    logDiv.scrollTop = logDiv.scrollHeight;
-    statusDiv.innerHTML = e.data;
-  };
-  scanWs.onclose = () => { scanWs = null; pollStatus(); };
-}
-
-async function stopScan() {
-  await api('/api/scans/stop', {method:'POST'});
-  if (scanWs) { scanWs.close(); scanWs = null; }
-  document.getElementById('scanLog').innerHTML += '<div class="line warn">⛔ Scan stopped</div>';
-  pollStatus();
-}
-
-// ─── Scanners ───────────────────────────────────────────────────
-async function loadScannerList() {
-  const res = await api('/api/scans/scanner-list');
-  const select = document.getElementById('scannerSelect');
-  const listDiv = document.getElementById('scannerList');
-  if (!res.scanners?.length) { listDiv.innerHTML = '<span class="text-muted">No scanners available</span>'; return; }
-  select.innerHTML = res.scanners.map(s => `<option value="${s.key}">${s.label}</option>`).join('');
-  let html = '<table><thead><tr><th>Key</th><th>Name</th></tr></thead><tbody>';
-  res.scanners.forEach(s => { html += `<tr><td><span class="badge blue">${s.key}</span></td><td>${s.label}</td></tr>`; });
-  html += '</tbody></table>';
-  listDiv.innerHTML = html;
-}
-
-async function runInlineScanner() {
-  const scanner = document.getElementById('scannerSelect').value;
-  const domain = document.getElementById('scannerTarget').value.trim();
-  if (!domain) return alert('Enter a target domain');
-  const output = document.getElementById('scannerOutput');
-  output.innerHTML = `<div class="line">Running ${scanner} on ${domain}...</div>`;
-  const res = await api('/api/scans/scanner-run', {method:'POST',body:JSON.stringify({scanner,domain})});
-  const findings = res.findings || res.links_found || res.links_checked || res.endpoints || res.params || res.probes || 0;
-  output.innerHTML += `<div class="line ${res.error?'error':'info'}">${res.error ? 'Error: '+res.error : 'Done — '+findings+' findings'}</div>`;
-}
-
-// ─── Pipeline ───────────────────────────────────────────────────
-async function startPipeline() {
-  const domain = document.getElementById('pipelineTarget').value.trim();
-  if (!domain) return alert('Enter a target');
-  const steps = [
-    {key:'passive',label:'Passive Recon (subfinder → assetfinder)'},
-    {key:'active',label:'Active Recon (httpx → portscan → WAF)'},
-    {key:'discovery',label:'Content Discovery (gau → katana → JS → fuzzing)'},
-    {key:'nuclei',label:'Automated Scanning (Nuclei)'},
-    {key:'vulnscan',label:'Vulnerability Scan (SQLi → XSS → LFI → CORS → SSTI → SSRF → Host Header)'},
-    {key:'intel',label:'Intel & Discovery (BLH → 3rd Party → Cred → GraphQL → JS)'},
-  ];
-  const container = document.getElementById('pipelineSteps');
-  const log = document.getElementById('pipelineLog');
-  log.innerHTML = `<div class="line">Starting pipeline for ${domain}...</div>`;
-
-  // Show steps
-  container.innerHTML = steps.map(s => `
-    <div class="pipeline-step pending" id="pstep-${s.key}">
-      <div class="step-status">⬜</div>
-      <div class="step-label">${s.label}</div>
-    </div>
-  `).join('');
-
-  const res = await api('/api/scans/pipeline-run', {method:'POST',body:JSON.stringify({domain})});
-  steps.forEach(s => {
-    const el = document.getElementById('pstep-'+s.key);
-    if (el) { el.className = 'pipeline-step done'; el.querySelector('.step-status').textContent = '✓'; }
-  });
-  log.innerHTML += '<div class="line info">Pipeline complete.</div>';
-}
-
-// ─── Targets ────────────────────────────────────────────────────
-async function loadTargets() {
-  const res = await api('/api/targets/');
-  const div = document.getElementById('targetList');
-  if (!res.targets?.length) { div.innerHTML = '<span class="text-muted">No targets yet.</span>'; return; }
-  let html = '<table><thead><tr><th>Target</th><th>Notes</th><th>Created</th><th></th></tr></thead><tbody>';
-  res.targets.forEach(t => {
-    const name = t.addresses?.[0] || t.name || '-';
-    html += `<tr><td><strong>${name}</strong></td><td>${t.notes||'-'}</td><td>${(t.created_at||'').slice(0,10)}</td>
-      <td><button class="danger" style="padding:4px 8px;font-size:12px" onclick="deleteTarget('${name}')">✕</button></td></tr>`;
-  });
-  html += '</tbody></table>';
-  div.innerHTML = html;
-}
-async function addTarget() {
-  const target = document.getElementById('addTargetInput').value.trim();
-  if (!target) return alert('Enter a target');
-  const res = await api('/api/targets/', {method:'POST',body:JSON.stringify({target})});
-  if (res.error) return alert(res.error);
-  document.getElementById('addTargetInput').value = '';
-  loadTargets();
-}
-async function deleteTarget(name) {
-  if (!confirm(`Remove ${name}?`)) return;
-  await api('/api/targets/'+encodeURIComponent(name), {method:'DELETE'});
-  loadTargets();
-}
-
-// ─── Results ────────────────────────────────────────────────────
-async function loadResults() {
-  const [scansRes, nucleiRes, reportsRes] = await Promise.all([
-    api('/api/results/scans?limit=20'),
-    api('/api/results/nuclei'),
-    api('/api/results/reports'),
-  ]);
-  // Scans
-  const scansDiv = document.getElementById('resultsScans');
-  if (scansRes.scans?.length) {
-    let html = '<table><thead><tr><th>Scan ID</th><th>Scanner</th><th>Domain</th><th>Status</th><th>Findings</th><th>Date</th></tr></thead><tbody>';
-    scansRes.scans.forEach(s => {
-      html += `<tr><td>${(s.id||'').slice(0,8)}</td><td>${s.scanner||'-'}</td><td>${s.domain||'-'}</td>
-        <td><span class="badge ${s.status==='completed'?'green':s.status==='failed'?'red':'yellow'}">${s.status||'-'}</span></td>
-        <td>${s.total_links||0}</td><td>${(s.created_at||'').slice(0,19).replace('T',' ')}</td></tr>`;
-    });
-    html += '</tbody></table>';
-    scansDiv.innerHTML = html;
-  } else { scansDiv.innerHTML = '<span class="text-muted">No scan history.</span>'; }
-
-  // Nuclei
-  const nucDiv = document.getElementById('resultsNuclei');
-  if (nucleiRes.files?.length) {
-    let html = '<table><thead><tr><th>File</th><th>Findings</th></tr></thead><tbody>';
-    nucleiRes.files.slice(0,10).forEach(f => {
-      html += `<tr><td>${f.file}</td><td><span class="badge blue">${f.findings_count}</span></td></tr>`;
-      if (f.findings?.length) {
-        f.findings.slice(0,5).forEach(ln => { html += `<tr><td colspan="2" style="padding:4px 12px;font-size:11px;color:var(--muted)">${ln}</td></tr>`; });
-      }
-    });
-    html += '</tbody></table>';
-    nucDiv.innerHTML = html;
-  } else { nucDiv.innerHTML = '<span class="text-muted">No nuclei output yet.</span>'; }
-
-  // Reports
-  const repDiv = document.getElementById('resultsReports');
-  if (reportsRes.reports?.length) {
-    let html = '<table><thead><tr><th>Name</th><th>Type</th><th>Size</th><th></th></tr></thead><tbody>';
-    reportsRes.reports.forEach(r => {
-      html += `<tr><td>${r.name}</td><td><span class="badge blue">${r.type}</span></td><td>${(r.size/1024).toFixed(1)} KB</td>
-        <td><a href="/api/results/reports/${encodeURIComponent(r.name)}" target="_blank">Open</a></td></tr>`;
-    });
-    html += '</tbody></table>';
-    repDiv.innerHTML = html;
-  } else { repDiv.innerHTML = '<span class="text-muted">No reports yet.</span>'; }
-}
-
-// ─── Config ─────────────────────────────────────────────────────
-async function loadConfig() {
   try {
-    const [cfg, dirs] = await Promise.all([api('/api/config/'), api('/api/config/output-dirs')]);
-    const cfgDiv = document.getElementById('configBody');
-    if (cfg.config) {
-      let html = '<table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>';
-      Object.entries(cfg.config).forEach(([k,v]) => { html += `<tr><td>${k}</td><td>${v||'<span class="text-muted">—</span>'}</td></tr>`; });
-      html += '</tbody></table>';
-      cfgDiv.innerHTML = html;
-    }
-    const dirDiv = document.getElementById('outputDirsBody');
-    if (dirs.dirs) {
-      let html = '<table><thead><tr><th>Folder</th><th>Files</th></tr></thead><tbody>';
-      Object.entries(dirs.dirs).forEach(([k,v]) => {
-        html += `<tr><td><strong>${k}</strong></td><td>${v.count}</td></tr>`;
-      });
-      html += '</tbody></table>';
-      dirDiv.innerHTML = html;
-    }
+    const res = await api('/api/scans/start', {method:'POST',body:JSON.stringify({target,speed})});
+    if(res.error) { log.innerHTML += `<div class="line error">Error: ${esc(res.error)}</div>`; return toast(res.error,'error'); }
+    scanRunning = true;
+    toast('Scan started','success');
+
+    const proto = location.protocol==='https:'?'wss:':'ws:';
+    scanWs = new WebSocket(proto+'//'+location.host+'/api/scans/ws/log');
+    scanWs.onmessage = e => {
+      if(!log) return;
+      const cls = e.data.startsWith('[')?(e.data.includes('[✓]')||e.data.includes('[+]')?'info':e.data.includes('[!]')||e.data.includes('[✗]')?'error':e.data.includes('[ℹ]')||e.data.includes('[▶]')?'warn':''):'';
+      log.innerHTML += `<div class="line ${cls}">${esc(e.data)}</div>`;
+      $('logLineCount').textContent = `${++scanLogLines} lines`;
+      log.scrollTop = log.scrollHeight;
+    };
+    scanWs.onclose = () => { scanWs=null; pollDeepScanStatus(); };
+    pollDeepScanStatus();
   } catch(e) {
-    document.getElementById('configBody').innerHTML = `<span class="text-muted">Error: ${e.message}</span>`;
+    log.innerHTML += `<div class="line error">Error: ${esc(e.message)}</div>`;
+    toast('Failed to start scan','error');
   }
 }
 
-// ─── Init ───────────────────────────────────────────────────────
-loadDashboard();
+async function stopScan() {
+  try {
+    await api('/api/scans/stop', {method:'POST'});
+    if(scanWs) { scanWs.close(); scanWs=null; }
+    const log=$('scanLog');
+    if(log) log.innerHTML += `<div class="line warn">⛔ Scan stopped by user</div>`;
+    toast('Scan stopped','warning');
+    pollDeepScanStatus();
+  } catch(e) { toast('Error stopping scan','error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PAGE: Scanners
+// ═══════════════════════════════════════════════════════════════
+PAGES.scanners = async function() {
+  const c = $('pageContent');
+  c.innerHTML = loading('Loading scanners...');
+  try {
+    const res = await api('/api/scans/scanner-list');
+    const scanners = res.scanners||[];
+    c.innerHTML = `
+    <div class="row">
+      <div class="col">
+        <div class="card">
+          <div class="card-header">▶ Run Scanner</div>
+          <div class="card-body">
+            <div class="mb-1">
+              <label style="font-size:12px;color:var(--text-2);margin-bottom:4px;display:block">Scanner Module</label>
+              <select id="scannerSelect">${scanners.map(s=>`<option value="${s.key}">${esc(s.label)}</option>`).join('')}</select>
+            </div>
+            <div class="mb-1">
+              <label style="font-size:12px;color:var(--text-2);margin-bottom:4px;display:block">Target Domain</label>
+              <input id="scannerTarget" placeholder="example.com">
+            </div>
+            <button class="btn btn-primary btn-lg" onclick="runInlineScanner()">▶ Run Scanner</button>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="card">
+          <div class="card-header">📋 Available Scanners (${scanners.length})</div>
+          <div class="card-body" style="padding:0">
+            <div class="table-wrap"><table><thead><tr><th>Key</th><th>Name</th></tr></thead><tbody>
+            ${scanners.map(s=>`<tr><td><span class="tag tag-blue">${esc(s.key)}</span></td><td>${esc(s.label)}</td></tr>`).join('')}
+            </tbody></table></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">📜 Output</div>
+      <div class="card-body" style="padding:0">
+        <div class="terminal" id="scannerOutput" style="max-height:400px;border-radius:0;border:none"><span class="line muted">Run a scanner to see output...</span></div>
+      </div>
+    </div>`;
+  } catch(e) { c.innerHTML = emptyState('❌','Error: '+esc(e.message)); }
+};
+
+async function runInlineScanner() {
+  const scanner = $('scannerSelect').value;
+  const domain = $('scannerTarget').value.trim().toLowerCase();
+  if(!domain) return toast('Enter a target domain','warning');
+  const out = $('scannerOutput');
+  out.innerHTML = `<div class="line info">▶ Running ${esc(scanner)} on ${esc(domain)}...</div>`;
+  try {
+    const res = await api('/api/scans/scanner-run', {method:'POST',body:JSON.stringify({scanner,domain})});
+    const msg = res.error ? `Error: ${esc(res.error)}` : `✓ Done — ${res.findings||res.links_found||res.links_checked||res.endpoints||res.params||res.probes||0} findings`;
+    out.innerHTML += `<div class="line ${res.error?'error':'info'}">${msg}</div>`;
+    toast('Scanner finished','success');
+  } catch(e) { out.innerHTML += `<div class="line error">Error: ${esc(e.message)}</div>`; toast(e.message,'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PAGE: Pipeline
+// ═══════════════════════════════════════════════════════════════
+PAGES.pipeline = function() {
+  $('pageContent').innerHTML = `
+  <div class="row">
+    <div class="col">
+      <div class="card">
+        <div class="card-header">🧬 Pipeline Control</div>
+        <div class="card-body">
+          <div class="input-group mb-1">
+            <input id="pipelineTarget" placeholder="example.com">
+            <button class="btn btn-primary" onclick="startPipeline()">▶ Start</button>
+          </div>
+          <div style="font-size:12px;color:var(--text-2)">6-phase automated recon pipeline: passive recon → active recon → content discovery → nuclei → vuln scanning → intel.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="card">
+        <div class="card-header">📋 Progress</div>
+        <div class="card-body" id="pipelineStepsContainer">
+          ${emptyState('🧬','Start a pipeline to see progress.')}
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="card">
+        <div class="card-header">📜 Log</div>
+        <div class="card-body" style="padding:0">
+          <div class="terminal" id="pipelineLog" style="max-height:400px;border-radius:0;border:none"><span class="line muted">Ready</span></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+};
+
+async function startPipeline() {
+  const domain = $('pipelineTarget').value.trim().toLowerCase();
+  if(!domain) return toast('Enter a target domain','warning');
+
+  const steps = [
+    {key:'passive',label:'Passive Recon',desc:'subfinder → assetfinder → combine'},
+    {key:'active',label:'Active Recon',desc:'httpx probe → port scan → WAF detect → tech fingerprint'},
+    {key:'discovery',label:'Content Discovery',desc:'gau → katana → JS analysis → fuzzing → API recon'},
+    {key:'nuclei',label:'Automated Scanning',desc:'Nuclei — CVEs, exposures, misconfigs'},
+    {key:'vulnscan',label:'Vulnerability Scan',desc:'SQLi → XSS → LFI → CORS → SSTI → SSRF → Host Header'},
+    {key:'intel',label:'Intel & Discovery',desc:'BLH → 3rd Party → Cred → GraphQL → JS Secrets'},
+  ];
+
+  const container = $('pipelineStepsContainer');
+  container.innerHTML = steps.map(s => `
+    <div class="pipeline-step pending" id="pstep-${s.key}">
+      <div class="step-icon">⬜</div>
+      <div><div class="step-label">${esc(s.label)}</div><div class="step-desc">${esc(s.desc)}</div></div>
+    </div>
+  `).join('');
+
+  const log = $('pipelineLog');
+  log.innerHTML = `<div class="line info">▶ Starting pipeline for ${esc(domain)}...</div>`;
+
+  try {
+    const res = await api('/api/scans/pipeline-run', {method:'POST',body:JSON.stringify({domain})});
+    steps.forEach(s => {
+      const el = $('pstep-'+s.key);
+      if(el) { el.className = 'pipeline-step done'; el.querySelector('.step-icon').textContent = '✓'; }
+      log.innerHTML += `<div class="line info">✓ ${esc(s.label)}</div>`;
+    });
+    log.innerHTML += `<div class="line" style="color:var(--green);font-weight:600">✅ Pipeline complete for ${esc(domain)}</div>`;
+    toast('Pipeline complete','success');
+  } catch(e) {
+    log.innerHTML += `<div class="line error">Error: ${esc(e.message)}</div>`;
+    toast('Pipeline failed','error');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PAGE: Targets
+// ═══════════════════════════════════════════════════════════════
+PAGES.targets = async function() {
+  const c = $('pageContent');
+  c.innerHTML = loading('Loading targets...');
+  try {
+    const res = await api('/api/targets/');
+    const targets = res.targets||[];
+    c.innerHTML = `
+    <div class="card">
+      <div class="card-header">➕ Add Target</div>
+      <div class="card-body">
+        <div class="input-group">
+          <input id="addTargetInput" placeholder="example.com">
+          <button class="btn btn-primary" onclick="addTarget()">Add</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">🎯 Target List <span class="badge badge-neutral">${targets.length}</span></div>
+      <div class="card-body" style="padding:0">
+        ${targets.length ? `<div class="table-wrap"><table><thead><tr><th>Target</th><th>Notes</th><th>Created</th><th style="width:60px"></th></tr></thead><tbody>
+        ${targets.map(t => {
+          const name = t.addresses?.[0] || t.name || '-';
+          return `<tr><td><strong>${esc(name)}</strong></td><td class="text-muted">${esc(t.notes||'—')}</td><td class="text-muted">${fmtDate(t.created_at)}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteTarget('${esc(name)}')">✕</button></td></tr>`;
+        }).join('')}
+        </tbody></table></div>` : emptyState('🎯','No targets yet. Add your first target above.')}
+      </div>
+    </div>`;
+  } catch(e) { c.innerHTML = emptyState('❌','Error: '+esc(e.message)); }
+};
+
+async function addTarget() {
+  const t = $('addTargetInput').value.trim().toLowerCase();
+  if(!t) return toast('Enter a target','warning');
+  try {
+    const res = await api('/api/targets/', {method:'POST',body:JSON.stringify({target:t})});
+    if(res.error) return toast(res.error,'warning');
+    $('addTargetInput').value = '';
+    toast(`Target ${t} added`,'success');
+    PAGES.targets();
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function deleteTarget(name) {
+  modal('Delete Target', `<p>Remove <strong>${esc(name)}</strong> from targets?</p><p class="text-muted" style="font-size:12px">Scan data remains on disk.</p>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+     <button class="btn btn-danger" onclick="closeModal(); doDeleteTarget('${esc(name)}')">Delete</button>`);
+}
+async function doDeleteTarget(name) {
+  try {
+    await api('/api/targets/'+encodeURIComponent(name), {method:'DELETE'});
+    toast(`Target ${name} deleted`,'success');
+    PAGES.targets();
+  } catch(e) { toast(e.message,'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PAGE: Results
+// ═══════════════════════════════════════════════════════════════
+let resultsTab = 'scans';
+
+PAGES.results = async function() {
+  const c = $('pageContent');
+  c.innerHTML = `
+    <div class="tabs">
+      <div class="tab ${resultsTab==='scans'?'active':''}" onclick="switchResultsTab('scans')">📋 Scan History</div>
+      <div class="tab ${resultsTab==='nuclei'?'active':''}" onclick="switchResultsTab('nuclei')">📄 Nuclei</div>
+      <div class="tab ${resultsTab==='reports'?'active':''}" onclick="switchResultsTab('reports')">📁 Reports</div>
+    </div>
+    <div id="resultsContent">${loading()}</div>`;
+  loadResultsTab(resultsTab);
+};
+
+function switchResultsTab(tab) {
+  resultsTab = tab;
+  qsa('.tabs .tab').forEach(el => el.classList.toggle('active', el.textContent.includes(tab==='scans'?'Scan':tab==='nuclei'?'Nuclei':'Report')));
+  $('resultsContent').innerHTML = loading();
+  loadResultsTab(tab);
+}
+
+async function loadResultsTab(tab) {
+  const c = $('resultsContent');
+  try {
+    if(tab === 'scans') {
+      const res = await api('/api/results/scans?limit=50');
+      const scans = res.scans||[];
+      c.innerHTML = `<div class="card"><div class="card-header">📋 Scan History <span class="badge badge-neutral">${scans.length}</span></div><div class="card-body" style="padding:0">
+        ${scans.length ? `<div class="table-wrap"><table><thead><tr><th>ID</th><th>Scanner</th><th>Domain</th><th>Status</th><th>Findings</th><th>Sources</th><th>Date</th></tr></thead><tbody>
+        ${scans.map(s=>`<tr><td><code>${(s.id||'').slice(0,8)}</code></td><td>${esc(s.scanner||'-')}</td><td>${esc(s.domain||'-')}</td>
+        <td><span class="tag ${s.status==='completed'?'tag-green':s.status==='failed'?'tag-red':'tag-yellow'}">${esc(s.status||'-')}</span></td>
+        <td>${s.total_links||0}</td><td>${s.total_sources||0}</td><td class="text-muted">${fmtDate(s.created_at)}</td></tr>`).join('')}
+        </tbody></table></div>` : emptyState('📭','No scan history yet.')}
+      </div></div>`;
+    } else if(tab === 'nuclei') {
+      const res = await api('/api/results/nuclei');
+      const files = res.files||[];
+      if(!files.length) { c.innerHTML = emptyState('📄','No nuclei output files found.'); return; }
+      let html = '';
+      files.slice(0,15).forEach(f => {
+        html += `<div class="card"><div class="card-header">📄 ${esc(f.file)} <span class="badge badge-neutral">${f.findings_count} findings</span></div>
+        <div class="card-body">`;
+        if(f.findings?.length) {
+          html += `<div class="terminal" style="max-height:200px">`;
+          f.findings.slice(0,30).forEach(ln => {
+            const sev = ln.includes('[critical]')?'error':ln.includes('[high]')?'warn':ln.includes('[medium]')?'info':'';
+            html += `<div class="line ${sev}">${esc(ln)}</div>`;
+          });
+          if(f.findings.length > 30) html += `<div class="line muted">... +${f.findings.length-30} more</div>`;
+          html += `</div>`;
+        } else { html += `<div class="text-muted">No findings</div>`; }
+        html += `</div></div>`;
+      });
+      c.innerHTML = html;
+    } else if(tab === 'reports') {
+      const res = await api('/api/results/reports');
+      const reports = res.reports||[];
+      c.innerHTML = `<div class="card"><div class="card-header">📁 Generated Reports <span class="badge badge-neutral">${reports.length}</span></div><div class="card-body" style="padding:0">
+        ${reports.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Size</th><th></th></tr></thead><tbody>
+        ${reports.map(r => `<tr><td>${esc(r.name)}</td><td><span class="tag tag-blue">${esc(r.type||'')}</span></td><td class="text-muted">${(r.size/1024).toFixed(1)} KB</td>
+        <td><a class="btn btn-secondary btn-sm" href="/api/results/reports/${encodeURIComponent(r.name)}" target="_blank">Open ↗</a></td></tr>`).join('')}
+        </tbody></table></div>` : emptyState('📁','No reports generated yet.')}
+      </div></div>`;
+    }
+  } catch(e) { c.innerHTML = emptyState('❌','Error: '+esc(e.message)); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PAGE: Acunetix
+// ═══════════════════════════════════════════════════════════════
+PAGES.acunetix = async function() {
+  const c = $('pageContent');
+  c.innerHTML = loading('Connecting to Acunetix...');
+  try {
+    const status = await api('/api/acunetix/status');
+    let targets=[], scans=[], vulns=[];
+
+    if(status.connected) {
+      try { const t=await api('/api/acunetix/targets'); targets=t.targets||[]; } catch(e){}
+      try { const s=await api('/api/acunetix/scans?limit=15'); scans=s.scans||[]; } catch(e){}
+      try { const v=await api('/api/acunetix/vulns?limit=30'); vulns=v.vulnerabilities||[]; } catch(e){}
+    }
+
+    c.innerHTML = `
+    <div class="row">
+      <div class="col-3">
+        <div class="card">
+          <div class="card-header">🦅 Connection</div>
+          <div class="card-body">
+            <div style="padding:12px;background:var(--bg-3);border-radius:4px;font-size:13px">
+              <div>Status: <strong style="color:${status.connected?'var(--green)':'var(--red)'}">${status.connected?'Connected':'Disconnected'}</strong></div>
+              ${status.url ? `<div class="text-muted mt-1">URL: ${esc(status.url)}</div>` : ''}
+              ${status.error ? `<div class="text-muted mt-1" style="color:var(--red)">Error: ${esc(status.error)}</div>` : ''}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-3">
+        <div class="card"><div class="card-header">🎯 Targets</div><div class="card-body"><div class="stat-value" style="font-size:28px;font-weight:700">${targets.length}</div></div></div>
+      </div>
+      <div class="col-3">
+        <div class="card"><div class="card-header">📡 Scans</div><div class="card-body"><div class="stat-value" style="font-size:28px;font-weight:700">${scans.length}</div></div></div>
+      </div>
+      <div class="col-3">
+        <div class="card"><div class="card-header">🐞 Vulns</div><div class="card-body"><div class="stat-value" style="font-size:28px;font-weight:700">${vulns.length}</div></div></div>
+      </div>
+    </div>
+    ${status.connected ? `
+    <div class="card">
+      <div class="card-header">📡 Recent Scans</div>
+      <div class="card-body" style="padding:0">
+        ${scans.length ? `<div class="table-wrap"><table><thead><tr><th>ID</th><th>Target</th><th>Status</th><th>Severity</th><th>Date</th><th></th></tr></thead><tbody>
+        ${scans.map(s => {
+          const sev = s.severity_counts||{};
+          const total = (sev.critical||0)+(sev.high||0)+(sev.medium||0)+(sev.low||0);
+          return `<tr><td><code>${(s.scan_id||s.id||'').slice(0,8)}</code></td>
+          <td>${esc(s.target?.address||s.target?.hostname||s.url||'-')}</td>
+          <td><span class="tag ${s.status==='completed'?'tag-green':'tag-yellow'}">${esc(s.status||'-')}</span></td>
+          <td>${sev.critical?`<span class="badge badge-critical">${sev.critical}</span>`:''} ${sev.high?`<span class="badge badge-high">${sev.high}</span>`:''}</td>
+          <td class="text-muted">${fmtDate(s.start_date||s.created_at)}</td>
+          <td><button class="btn btn-secondary btn-sm" onclick="viewAcxVulns('${s.scan_id||s.id||''}')">Vulns</button></td></tr>`;
+        }).join('')}
+        </tbody></table></div>` : emptyState('📡','No scans yet.')}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">🐞 Vulnerabilities</div>
+      <div class="card-body" style="padding:0">
+        ${vulns.length ? `<div class="table-wrap"><table><thead><tr><th>Severity</th><th>Name</th><th>URL</th><th>Status</th></tr></thead><tbody>
+        ${vulns.map(v => `<tr>
+          <td>${severityBadge(v.severity)}</td>
+          <td>${esc(v.vt_name||v.name||v.param||'-')}</td>
+          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(v.affects_url||v.url||'')}">${esc(v.affects_url||v.url||'-')}</td>
+          <td><span class="tag ${v.status==='open'?'tag-red':'tag-green'}">${esc(v.status||'open')}</span></td>
+        </tr>`).join('')}
+        </tbody></table></div>` : emptyState('🐞','No vulnerabilities yet.')}
+      </div>
+    </div>` : `<div class="card"><div class="card-body text-center text-muted">Configure Acunetix URL and API key in <strong>config.py</strong> or <strong>user_config.json</strong> to enable Acunetix integration.</div></div>`}`;
+  } catch(e) { c.innerHTML = emptyState('❌','Error: '+esc(e.message)); }
+};
+
+async function viewAcxVulns(scanId) {
+  if(!scanId) return toast('No scan ID','warning');
+  try {
+    const res = await api(`/api/acunetix/vulns/${scanId}`);
+    const vulns = res.vulnerabilities||[];
+    let html = `<p style="margin-bottom:12px;color:var(--text-2)">Scan: <code>${scanId.slice(0,18)}</code> — ${vulns.length} vulns</p>`;
+    if(vulns.length) {
+      html += `<div class="table-wrap"><table><thead><tr><th>Severity</th><th>Name</th><th>URL</th><th>Param</th></tr></thead><tbody>`;
+      vulns.forEach(v => {
+        html += `<tr><td>${severityBadge(v.severity)}</td>
+        <td>${esc(v.vt_name||v.name||'-')}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(v.affects_url||v.url||'-')}</td>
+        <td>${esc(v.param||'-')}</td></tr>`;
+      });
+      html += `</tbody></table></div>`;
+    } else { html += '<div class="text-muted">No vulns for this scan.</div>'; }
+    modal('Acunetix Vulnerabilities', html, `<button class="btn btn-secondary" onclick="closeModal()">Close</button>`);
+  } catch(e) { toast(e.message,'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PAGE: AI Analysis
+// ═══════════════════════════════════════════════════════════════
+PAGES.ai = async function() {
+  const c = $('pageContent');
+  c.innerHTML = loading('Loading AI providers...');
+  try {
+    const res = await api('/api/ai/providers');
+    const providers = res.providers||[];
+    c.innerHTML = `
+    <div class="row">
+      <div class="col">
+        <div class="card">
+          <div class="card-header">🤖 AI Analysis</div>
+          <div class="card-body">
+            <div class="mb-1">
+              <label style="font-size:12px;color:var(--text-2);margin-bottom:4px;display:block">Provider</label>
+              <select id="aiProvider">${providers.map(p => `<option value="${p.key}">${esc(p.label)} ${p.configured?'✓':'⚠ Not configured'}</option>`).join('')}</select>
+            </div>
+            <div class="mb-1">
+              <label style="font-size:12px;color:var(--text-2);margin-bottom:4px;display:block">Model</label>
+              <select id="aiModel">
+                ${providers.filter(p => p.configured).map(p => (p.models||[]).map(m => `<option value="${m}">${esc(m)}</option>`).join('')).join('')}
+                ${providers.filter(p => !p.configured).length === providers.length ? '<option value="">No providers configured</option>' : ''}
+              </select>
+            </div>
+            <div class="mb-1">
+              <label style="font-size:12px;color:var(--text-2);margin-bottom:4px;display:block">Prompt / Context</label>
+              <textarea id="aiPrompt" rows="6" placeholder="Analyse these findings...&#10;Summarise vulnerabilities for example.com..."></textarea>
+            </div>
+            <button class="btn btn-primary btn-lg" onclick="runAiAnalysis()">🤖 Analyse</button>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="card">
+          <div class="card-header">🔑 Provider Status</div>
+          <div class="card-body" style="padding:0">
+            <table><thead><tr><th>Provider</th><th>Status</th><th>Key</th></tr></thead><tbody>
+            ${providers.map(p => `<tr><td><strong>${esc(p.label)}</strong></td>
+            <td>${p.configured ? '<span class="badge badge-success">Configured</span>' : '<span class="badge badge-warning">Missing</span>'}</td>
+            <td class="text-muted">${p.masked||'—'}</td></tr>`).join('')}
+            </tbody></table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">💡 Quick Prompts</div>
+          <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
+            <button class="btn btn-secondary" style="justify-content:flex-start" onclick="document.getElementById('aiPrompt').value='List all vulnerabilities found and categorise by severity. Summarise the overall security posture.'">Analyse findings</button>
+            <button class="btn btn-secondary" style="justify-content:flex-start" onclick="document.getElementById('aiPrompt').value='Generate a penetration testing report structure for the findings, including risk ratings and remediation steps.'">Generate report</button>
+            <button class="btn btn-secondary" style="justify-content:flex-start" onclick="document.getElementById('aiPrompt').value='Extract all endpoints, API paths, and sensitive parameters from the scan output.'">Extract endpoints</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">📝 Analysis Result</div>
+      <div class="card-body" style="padding:0">
+        <div class="terminal" id="aiOutput" style="max-height:500px;border-radius:0;border:none"><span class="line muted">Run an analysis to see results...</span></div>
+      </div>
+    </div>`;
+  } catch(e) { c.innerHTML = emptyState('❌','Error: '+esc(e.message)); }
+};
+
+async function runAiAnalysis() {
+  const provider = $('aiProvider').value;
+  const model = $('aiModel').value;
+  const prompt = $('aiPrompt').value.trim();
+  if(!prompt) return toast('Enter a prompt','warning');
+  const out = $('aiOutput');
+  out.innerHTML = `<div class="line info">🤖 Analysing via ${esc(provider)}/${esc(model)}...</div>`;
+  try {
+    const res = await api('/api/ai/analyze', {method:'POST',body:JSON.stringify({provider,model,prompt})});
+    out.innerHTML = `<div class="line info" style="margin-bottom:8px">✓ Analysis from <strong>${esc(provider)}</strong> / <strong>${esc(model)}</strong></div>
+    <div style="white-space:pre-wrap">${esc(res.result||'No result')}</div>`;
+    toast('Analysis complete','success');
+  } catch(e) {
+    out.innerHTML += `<div class="line error">Error: ${esc(e.message)}</div>`;
+    toast(e.message,'error');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PAGE: Config
+// ═══════════════════════════════════════════════════════════════
+PAGES.config = async function() {
+  const c = $('pageContent');
+  c.innerHTML = loading('Loading configuration...');
+  try {
+    const [cfg, dirs] = await Promise.all([
+      api('/api/config/').catch(()=>({config:{}})),
+      api('/api/config/output-dirs').catch(()=>({dirs:{}}))
+    ]);
+    c.innerHTML = `
+    <div class="card">
+      <div class="card-header">⚙️ Configuration</div>
+      <div class="card-body" style="padding:0">
+        <div class="table-wrap"><table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>
+        ${Object.entries(cfg.config||{}).map(([k,v]) => `<tr><td><code>${esc(k)}</code></td><td>${v ? esc(v) : '<span class="text-muted">—</span>'}</td></tr>`).join('')}
+        </tbody></table></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">📁 Output Directories</div>
+      <div class="card-body" style="padding:0">
+        <div class="table-wrap"><table><thead><tr><th>Folder</th><th>Files</th></tr></thead><tbody>
+        ${Object.entries(dirs.dirs||{}).map(([k,v]) => `<tr><td><code>${esc(k)}</code></td><td>${v.count||0}</td></tr>`).join('')}
+        </tbody></table></div>
+      </div>
+    </div>`;
+  } catch(e) { c.innerHTML = emptyState('❌','Error: '+esc(e.message)); }
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════════
+PAGES.dashboard();
 </script>
 </body>
 </html>
