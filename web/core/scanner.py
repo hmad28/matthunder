@@ -23,7 +23,10 @@ SCANNER_KEYS = {
     "cred": "Credential/Config URLs",
     "ssti": "SSTI Probe",
     "cors": "CORS Misconfiguration",
-    "xss": "XSS Scan (dalfox)",
+    "xss": "XSS Scan",
+    "ssrf": "SSRF (Server-Side Request Forgery)",
+    "hostheader": "Host Header Injection",
+    "graphql": "GraphQL Introspection",
     "apirecon": "API Recon (kiterunner)",
     "params": "Hidden Parameters (arjun)",
     "sqli": "SQL Injection (sqlmap)",
@@ -99,8 +102,8 @@ PIPELINE_STEPS = [
     ("active",     "Active Recon (httpx → portscan → WAF)"),
     ("discovery",  "Content Discovery (gau → katana → JS → fuzzing → API)"),
     ("nuclei",     "Automated Scanning (Nuclei focused templates)"),
-    ("vulnscan",   "Vulnerability Scan (SQLi → XSS → LFI → CORS → SSTI)"),
-    ("intel",      "Intel & Discovery (BLH → 3rd Party → Cred URLs)"),
+    ("vulnscan",   "Vulnerability Scan (SQLi → XSS → LFI → CORS → SSTI → SSRF → Host H)"),
+    ("intel",      "Intel & Discovery (BLH → 3rd Party → Cred → GraphQL → JS Secrets)"),
 ]
 
 

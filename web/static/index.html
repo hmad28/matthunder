@@ -377,8 +377,8 @@ async function startPipeline() {
     {key:'active',label:'Active Recon (httpx → portscan → WAF)'},
     {key:'discovery',label:'Content Discovery (gau → katana → JS → fuzzing)'},
     {key:'nuclei',label:'Automated Scanning (Nuclei)'},
-    {key:'vulnscan',label:'Vulnerability Scan (SQLi → XSS → LFI → CORS → SSTI)'},
-    {key:'intel',label:'Intel & Discovery (BLH → 3rd Party → Cred URLs)'},
+    {key:'vulnscan',label:'Vulnerability Scan (SQLi → XSS → LFI → CORS → SSTI → SSRF → Host Header)'},
+    {key:'intel',label:'Intel & Discovery (BLH → 3rd Party → Cred → GraphQL → JS)'},
   ];
   const container = document.getElementById('pipelineSteps');
   const log = document.getElementById('pipelineLog');
