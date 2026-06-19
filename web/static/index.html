@@ -173,6 +173,8 @@ td .text-muted{color:var(--text-2)}
 .empty-state .empty-icon{font-size:40px;margin-bottom:8px}
 pre{font-family:var(--mono);font-size:12px;line-height:1.5}
 a{color:var(--blue);text-decoration:none}
+.clickable{cursor:pointer}
+.clickable:hover td{background:var(--blue-bg)!important}
 a:hover{text-decoration:underline}
 code{background:var(--bg-3);padding:2px 6px;border-radius:3px;font-size:12px}
 .tag{display:inline-block;padding:1px 8px;border-radius:3px;font-size:11px;font-weight:500}
@@ -706,69 +708,260 @@ async function doDeleteTarget(name) {
 // ═══════════════════════════════════════════════════════════════
 let resultsTab = 'scans';
 
+let resultsState = { tab: 'scans', scanId: null, sevFilter: '', searchQuery: '', findingsCache: {} };
+
 PAGES.results = async function() {
-  const c = $('pageContent');
-  c.innerHTML = `
-    <div class="tabs">
-      <div class="tab ${resultsTab==='scans'?'active':''}" onclick="switchResultsTab('scans')">📋 Scan History</div>
-      <div class="tab ${resultsTab==='nuclei'?'active':''}" onclick="switchResultsTab('nuclei')">📄 Nuclei</div>
-      <div class="tab ${resultsTab==='reports'?'active':''}" onclick="switchResultsTab('reports')">📁 Reports</div>
-    </div>
-    <div id="resultsContent">${loading()}</div>`;
-  loadResultsTab(resultsTab);
+  resultsState.scanId = null; // reset on page enter
+  renderResultsNav();
+  await loadResultsView();
 };
 
-function switchResultsTab(tab) {
-  resultsTab = tab;
-  qsa('.tabs .tab').forEach(el => el.classList.toggle('active', el.textContent.includes(tab==='scans'?'Scan':tab==='nuclei'?'Nuclei':'Report')));
-  $('resultsContent').innerHTML = loading();
-  loadResultsTab(tab);
+function renderResultsNav() {
+  $('pageContent').innerHTML = `
+    <div id="resultsBreadcrumb" style="margin-bottom:16px;font-size:13px;color:var(--text-2)"></div>
+    <div class="tabs">
+      <div class="tab ${resultsState.tab==='scans'?'active':''}" onclick="switchResultsTab('scans')">📋 Scans</div>
+      <div class="tab ${resultsState.tab==='findings'?'active':''}" onclick="switchResultsTab('findings')">🐞 Findings</div>
+      <div class="tab ${resultsState.tab==='nuclei'?'active':''}" onclick="switchResultsTab('nuclei')">📄 Nuclei</div>
+      <div class="tab ${resultsState.tab==='reports'?'active':''}" onclick="switchResultsTab('reports')">📁 Reports</div>
+    </div>
+    <div id="resultsContent">${loading()}</div>`;
 }
 
-async function loadResultsTab(tab) {
+function switchResultsTab(tab, scanId) {
+  resultsState.tab = tab;
+  if (scanId) resultsState.scanId = scanId;
+  renderResultsNav();
+  loadResultsView();
+}
+
+function resultsBreadcrumb(parts) {
+  // parts = [{label,click}] 
+  let html = parts.map((p,i) => {
+    if (i === parts.length-1) return `<span style="color:var(--text);font-weight:500">${esc(p.label)}</span>`;
+    return `<a href="#" onclick="(${p.click})();return false" style="color:var(--blue)">${esc(p.label)}</a> <span style="color:var(--text-3);margin:0 6px">›</span>`;
+  }).join('');
+  $('resultsBreadcrumb').innerHTML = html;
+}
+
+async function loadResultsView() {
   const c = $('resultsContent');
   try {
-    if(tab === 'scans') {
-      const res = await api('/api/results/scans?limit=50');
-      const scans = res.scans||[];
-      c.innerHTML = `<div class="card"><div class="card-header">📋 Scan History <span class="badge badge-neutral">${scans.length}</span></div><div class="card-body" style="padding:0">
-        ${scans.length ? `<div class="table-wrap"><table><thead><tr><th>ID</th><th>Scanner</th><th>Domain</th><th>Status</th><th>Findings</th><th>Sources</th><th>Date</th></tr></thead><tbody>
-        ${scans.map(s=>`<tr><td><code>${(s.id||'').slice(0,8)}</code></td><td>${esc(s.scanner||'-')}</td><td>${esc(s.domain||'-')}</td>
-        <td><span class="tag ${s.status==='completed'?'tag-green':s.status==='failed'?'tag-red':'tag-yellow'}">${esc(s.status||'-')}</span></td>
-        <td>${s.total_links||0}</td><td>${s.total_sources||0}</td><td class="text-muted">${fmtDate(s.created_at)}</td></tr>`).join('')}
-        </tbody></table></div>` : emptyState('📭','No scan history yet.')}
-      </div></div>`;
-    } else if(tab === 'nuclei') {
-      const res = await api('/api/results/nuclei');
-      const files = res.files||[];
-      if(!files.length) { c.innerHTML = emptyState('📄','No nuclei output files found.'); return; }
-      let html = '';
-      files.slice(0,15).forEach(f => {
-        html += `<div class="card"><div class="card-header">📄 ${esc(f.file)} <span class="badge badge-neutral">${f.findings_count} findings</span></div>
-        <div class="card-body">`;
-        if(f.findings?.length) {
-          html += `<div class="terminal" style="max-height:200px">`;
-          f.findings.slice(0,30).forEach(ln => {
-            const sev = ln.includes('[critical]')?'error':ln.includes('[high]')?'warn':ln.includes('[medium]')?'info':'';
-            html += `<div class="line ${sev}">${esc(ln)}</div>`;
-          });
-          if(f.findings.length > 30) html += `<div class="line muted">... +${f.findings.length-30} more</div>`;
-          html += `</div>`;
-        } else { html += `<div class="text-muted">No findings</div>`; }
-        html += `</div></div>`;
-      });
-      c.innerHTML = html;
-    } else if(tab === 'reports') {
-      const res = await api('/api/results/reports');
-      const reports = res.reports||[];
-      c.innerHTML = `<div class="card"><div class="card-header">📁 Generated Reports <span class="badge badge-neutral">${reports.length}</span></div><div class="card-body" style="padding:0">
-        ${reports.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Size</th><th></th></tr></thead><tbody>
-        ${reports.map(r => `<tr><td>${esc(r.name)}</td><td><span class="tag tag-blue">${esc(r.type||'')}</span></td><td class="text-muted">${(r.size/1024).toFixed(1)} KB</td>
-        <td><a class="btn btn-secondary btn-sm" href="/api/results/reports/${encodeURIComponent(r.name)}" target="_blank">Open ↗</a></td></tr>`).join('')}
-        </tbody></table></div>` : emptyState('📁','No reports generated yet.')}
-      </div></div>`;
-    }
+    if (resultsState.tab === 'scans') await loadScansList(c);
+    else if (resultsState.tab === 'scandetail') await loadScanDetail(c);
+    else if (resultsState.tab === 'findings') await loadFindingsList(c);
+    else if (resultsState.tab === 'nuclei') await loadNucleiList(c);
+    else if (resultsState.tab === 'reports') await loadReportsList(c);
   } catch(e) { c.innerHTML = emptyState('❌','Error: '+esc(e.message)); }
+}
+
+// ── Scans List ────────────────────────────────────────────────
+async function loadScansList(c) {
+  resultsBreadcrumb([{label:'Results'},{label:'Scan History'}]);
+  const res = await api('/api/results/scans?limit=50');
+  const scans = res.scans||[];
+  c.innerHTML = `<div class="card"><div class="card-header">📋 Scan History <span class="badge badge-neutral">${scans.length}</span></div><div class="card-body" style="padding:0">
+    ${scans.length ? `<div class="table-wrap"><table><thead><tr><th>ID</th><th>Scanner</th><th>Domain</th><th>Status</th><th>Findings</th><th>Sources</th><th>Date</th><th></th></tr></thead><tbody>
+    ${scans.map(s => `<tr class="clickable" onclick="openScanDetail('${s.id}','${esc(s.domain||'')}')">
+      <td><code>${(s.id||'').slice(0,8)}</code></td>
+      <td>${esc(s.scanner||'-')}</td>
+      <td><strong>${esc(s.domain||'-')}</strong></td>
+      <td><span class="tag ${s.status==='completed'?'tag-green':s.status==='failed'?'tag-red':'tag-yellow'}">${esc(s.status||'-')}</span></td>
+      <td><span class="badge badge-info">${s.total_links||0}</span></td>
+      <td class="text-muted">${s.total_sources||0}</td>
+      <td class="text-muted">${fmtDate(s.created_at)}</td>
+      <td><button class="btn btn-secondary btn-sm">View →</button></td>
+    </tr>`).join('')}
+    </tbody></table></div>` : emptyState('📭','No scan history yet.')}
+  </div></div>`;
+}
+
+// ── Scan Detail ────────────────────────────────────────────────
+let openScanId = null, openScanDomain = '';
+
+async function openScanDetail(scanId, domain) {
+  openScanId = scanId;
+  openScanDomain = domain;
+  resultsState.tab = 'scandetail';
+  renderResultsNav();
+  await loadResultsView();
+}
+
+async function loadScanDetail(c) {
+  const scanId = openScanId, domain = openScanDomain;
+  resultsBreadcrumb([
+    {label:'Results', click:'switchResultsTab(\'scans\')'},
+    {label:`Scan ${scanId.slice(0,8)}`}
+  ]);
+  c.innerHTML = loading('Loading findings...');
+  try {
+    const res = await api(`/api/results/findings/${scanId}?limit=500`);
+    const findings = res.findings||[];
+    const counts = res.severity_counts||{};
+    const scan = res.scan;
+
+    // Severity stat cards
+    let statsHtml = `<div class="stat-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px">
+      <div class="stat-card" style="border-top:3px solid var(--red)"><div class="stat-value" style="color:var(--red)">${counts.critical||0}</div><div class="stat-label">Critical</div></div>
+      <div class="stat-card" style="border-top:3px solid var(--orange)"><div class="stat-value" style="color:var(--orange)">${counts.high||0}</div><div class="stat-label">High</div></div>
+      <div class="stat-card" style="border-top:3px solid var(--yellow)"><div class="stat-value" style="color:var(--yellow)">${counts.medium||0}</div><div class="stat-label">Medium</div></div>
+      <div class="stat-card" style="border-top:3px solid var(--blue)"><div class="stat-value" style="color:var(--blue)">${counts.info||0}</div><div class="stat-label">Info</div></div>
+      <div class="stat-card"><div class="stat-value">${findings.length}</div><div class="stat-label">Total</div></div>
+    </div>`;
+
+    // Finding filter toolbar
+    let sevTabs = ['','critical','high','medium','info'].map(s => 
+      `<button class="tab ${resultsState.sevFilter===s?'active':''}" onclick="filterFindingsSev('${s}')">${s||'All'} <span class="badge">${s?counts[s]||0:findings.length}</span></button>`
+    ).join('');
+
+    // Finding rows
+    let visible = findings;
+    if (resultsState.sevFilter) {
+      visible = visible.filter(f => f.severity === resultsState.sevFilter);
+    }
+    if (resultsState.searchQuery) {
+      const q = resultsState.searchQuery.toLowerCase();
+      visible = visible.filter(f => (f.target_url||'').toLowerCase().includes(q) || (f.detail||'').toLowerCase().includes(q) || (f.category||'').toLowerCase().includes(q));
+    }
+
+    c.innerHTML = statsHtml + `
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:8px">
+        <span>🐞 Findings</span>
+        <div class="flex" style="margin-left:auto">
+          <input id="findingsSearch" placeholder="Search findings…" value="${esc(resultsState.searchQuery)}" style="width:220px;padding:4px 10px;font-size:12px" onkeyup="if(event.key==='Enter'){resultsState.searchQuery=this.value;loadScanDetail($('resultsContent'))}">
+        </div>
+      </div>
+      <div style="padding:8px 16px 0">
+        <div class="tabs" style="margin:0;border:none">${sevTabs}</div>
+      </div>
+      <div class="card-body" style="padding:0">
+        ${visible.length ? `<div class="table-wrap"><table><thead><tr><th style="width:80px">Severity</th><th>Finding</th><th>URL</th><th>Category</th><th>Status</th><th></th></tr></thead><tbody>
+        ${visible.map(f => {
+          const sev = f.severity||'info';
+          const badgeClass = sev==='critical'?'badge-critical':sev==='high'?'badge-high':sev==='medium'?'badge-medium':'badge-info';
+          return `<tr class="clickable" onclick="openFindingDetail('${f.id}')">
+            <td><span class="badge ${badgeClass}">${sev}</span></td>
+            <td><div style="font-weight:500">${esc(f.detail||f.category||'Finding')}</div>${f.anchor ? `<div class="text-muted" style="font-size:11px">${esc(f.anchor.slice(0,60))}</div>` : ''}</td>
+            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(f.target_url||'')}"><span class="text-muted">${esc((f.target_url||'').slice(0,80))}</span></td>
+            <td><span class="tag tag-blue">${esc(f.category||'-')}</span></td>
+            <td><span class="tag ${f.status==='alive'||f.status==='verified'?'tag-green':'tag-yellow'}">${esc(f.status||'unknown')}</span></td>
+            <td><span class="btn btn-secondary btn-sm" onclick="event.stopPropagation();openFindingDetail('${f.id}')">Detail →</span></td>
+          </tr>`;
+        }).join('')}
+        </tbody></table></div>` : emptyState('🔍','No findings match the current filter.')}
+      </div>
+    </div>`;
+  } catch(e) { c.innerHTML = emptyState('❌','Error: '+esc(e.message)); }
+}
+
+function filterFindingsSev(sev) {
+  resultsState.sevFilter = sev;
+  loadScanDetail($('resultsContent'));
+}
+
+// ── Finding Detail Drawer ─────────────────────────────────────
+async function openFindingDetail(findingId) {
+  try {
+    const res = await api(`/api/results/findings?limit=1`);
+    const allFindings = res.findings||[];
+    const f = allFindings.find(x => String(x.id) === String(findingId));
+    if (!f) return toast('Finding not found','warning');
+
+    const sev = f.severity||'info';
+    const badgeClass = sev==='critical'?'badge-critical':sev==='high'?'badge-high':sev==='medium'?'badge-medium':'badge-info';
+    const httpCode = f.http_code ? `<div class="card" style="margin:0;background:var(--bg-3)"><div class="card-body" style="padding:12px"><span class="text-muted">HTTP Status:</span> <strong>${f.http_code}</strong></div></div>` : '';
+    const sourceUrl = f.source_url ? `<div style="margin-top:8px"><span class="text-muted">Found on page:</span><br><code style="word-break:break-all">${esc(f.source_url)}</code></div>` : '';
+    const anchor = f.anchor ? `<div style="margin-top:8px"><span class="text-muted">Anchor text:</span><br><code>${esc(f.anchor)}</code></div>` : '';
+    const detail = f.detail ? `<div style="margin-top:12px;padding:12px;background:var(--bg-3);border-radius:4px;font-family:var(--mono);font-size:12px;white-space:pre-wrap">${esc(f.detail)}</div>` : '';
+    const scanDomain = f.scan_domain ? `<span class="text-muted">Scan:</span> ${esc(f.scan_domain)}` : '';
+
+    modal('🐞 Finding Detail', `
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px">
+        <span class="badge ${badgeClass}" style="font-size:14px;padding:4px 16px">${sev.toUpperCase()}</span>
+        <span class="tag tag-blue">${esc(f.category||'-')}</span>
+        <span class="tag ${f.status==='alive'||f.status==='verified'?'tag-green':'tag-yellow'}">${esc(f.status||'unknown')}</span>
+      </div>
+      <div style="margin-bottom:12px">
+        <div class="text-muted" style="font-size:12px">Target URL</div>
+        <code style="word-break:break-all">${esc(f.target_url||'-')}</code>
+      </div>
+      ${sourceUrl}
+      ${anchor}
+      ${httpCode}
+      ${f.detail ? `<div style="margin-top:12px">
+        <div class="text-muted" style="font-size:12px;margin-bottom:4px">Detail / Evidence</div>
+        ${detail}
+      </div>` : ''}
+      <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);font-size:12px">
+        ${scanDomain}
+        ${f.extracted_at ? `<br><span class="text-muted">Extracted:</span> ${fmtDate(f.extracted_at)}` : ''}
+        ${f.scan_id ? `<br><span class="text-muted">Scan ID:</span> <code>${esc(f.scan_id)}</code>` : ''}
+      </div>
+    `, `<button class="btn btn-secondary" onclick="closeModal()">Close</button>`);
+
+  } catch(e) { toast('Error loading finding: '+e.message,'error'); }
+}
+
+// ── Findings List (standalone) ────────────────────────────────
+async function loadFindingsList(c) {
+  resultsBreadcrumb([{label:'Results'},{label:'All Findings'}]);
+  try {
+    const res = await api('/api/results/findings?limit=200');
+    const findings = res.findings||[];
+    c.innerHTML = `<div class="card"><div class="card-header">🐞 All Findings <span class="badge badge-neutral">${res.total||findings.length}</span></div><div class="card-body" style="padding:0">
+      ${findings.length ? `<div class="table-wrap"><table><thead><tr><th style="width:80px">Severity</th><th>Detail</th><th>URL</th><th>Category</th><th>Date</th></tr></thead><tbody>
+      ${findings.map(f => {
+        const sev = f.severity||'info';
+        const bClass = sev==='critical'?'badge-critical':sev==='high'?'badge-high':sev==='medium'?'badge-medium':'badge-info';
+        return `<tr class="clickable" onclick="openFindingDetail('${f.id}')">
+          <td><span class="badge ${bClass}">${sev}</span></td>
+          <td><div style="font-weight:500">${esc(f.detail||f.category||'-').slice(0,80)}</div></td>
+          <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((f.target_url||'').slice(0,60))}</td>
+          <td><span class="tag tag-blue">${esc(f.category||'-')}</span></td>
+          <td class="text-muted" style="font-size:11px">${fmtDate(f.extracted_at)}</td>
+        </tr>`;
+      }).join('')}
+      </tbody></table></div>` : emptyState('📭','No findings yet. Run a scanner first.')}
+    </div></div>`;
+  } catch(e) { c.innerHTML = emptyState('❌','Error: '+esc(e.message)); }
+}
+
+// ── Nuclei ─────────────────────────────────────────────────────
+async function loadNucleiList(c) {
+  resultsBreadcrumb([{label:'Results'},{label:'Nuclei Output'}]);
+  const res = await api('/api/results/nuclei');
+  const files = res.files||[];
+  if(!files.length) { c.innerHTML = emptyState('📄','No nuclei output files found.'); return; }
+  let html = '';
+  files.slice(0,15).forEach(f => {
+    html += `<div class="card"><div class="card-header">📄 ${esc(f.file)} <span class="badge badge-neutral">${f.findings_count} findings</span></div>
+    <div class="card-body">`;
+    if(f.findings?.length) {
+      html += `<div class="terminal" style="max-height:250px">`;
+      f.findings.slice(0,40).forEach(ln => {
+        const sev = ln.severity||'info';
+        html += `<div class="line ${sev==='critical'||sev==='high'?'error':sev==='medium'?'warn':'info'}">${esc(ln.line)}</div>`;
+      });
+      if(f.findings.length > 40) html += `<div class="line muted">... +${f.findings.length-40} more</div>`;
+      html += `</div>`;
+    } else { html += `<div class="text-muted">No findings</div>`; }
+    html += `</div></div>`;
+  });
+  c.innerHTML = html;
+}
+
+// ── Reports ────────────────────────────────────────────────────
+async function loadReportsList(c) {
+  resultsBreadcrumb([{label:'Results'},{label:'Reports'}]);
+  const res = await api('/api/results/reports');
+  const reports = res.reports||[];
+  c.innerHTML = `<div class="card"><div class="card-header">📁 Generated Reports <span class="badge badge-neutral">${reports.length}</span></div><div class="card-body" style="padding:0">
+    ${reports.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Size</th><th></th></tr></thead><tbody>
+    ${reports.map(r => `<tr><td>${esc(r.name)}</td><td><span class="tag tag-blue">${esc(r.type||'')}</span></td><td class="text-muted">${(r.size/1024).toFixed(1)} KB</td>
+    <td><a class="btn btn-secondary btn-sm" href="/api/results/reports/${encodeURIComponent(r.name)}" target="_blank">Open ↗</a></td></tr>`).join('')}
+    </tbody></table></div>` : emptyState('📁','No reports generated yet.')}
+  </div></div>`;
 }
 
 // ═══════════════════════════════════════════════════════════════
