@@ -1,18 +1,15 @@
 """
 web/api/acunetix.py — Acunetix integration endpoints.
 
-Proxies to scanners/acunetix.py so the web frontend can
-list targets, scans, and vulnerabilities from Acunetix.
+Uses the real scanners/acunetix.py module functions.
 """
 
 from fastapi import APIRouter, HTTPException
 
 router = APIRouter(prefix="/api/acunetix", tags=["acunetix"])
 
-# Lazy import to avoid crashing if acunetix module is unavailable
 
-
-def _get_acx():
+def _load():
     try:
         import scanners.acunetix as acx
         return acx
@@ -20,33 +17,28 @@ def _get_acx():
         raise HTTPException(status_code=501, detail="Acunetix module not available")
 
 
-def _client(cfg=None):
-    acx = _get_acx()
-    if cfg is None:
-        try:
-            cfg = acx._load_cfg()
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
-    return acx._client(cfg)
-
-
-def _get(client, path):
-    return _get_acx()._get(client, path)
+def _get_client():
+    acx = _load()
+    try:
+        cfg = acx._load_config()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Acunetix config error: {e}")
+    return acx._client(cfg), acx, cfg
 
 
 @router.get("/status")
 async def acx_status():
-    """Check Acunetix connectivity and return basic info."""
+    """Check Acunetix connectivity."""
     try:
-        acx = _get_acx()
-        cfg = acx._load_cfg()
-        with acx._client(cfg) as c:
-            info = acx._get(c, "info")
+        client, acx, cfg = _get_client()
+        info = acx._get(client, "info")
         return {
             "connected": True,
             "url": cfg.get("url", ""),
             "info": info,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         return {"connected": False, "error": str(e)}
 
@@ -55,69 +47,79 @@ async def acx_status():
 async def acx_targets():
     """List Acunetix targets."""
     try:
-        acx = _get_acx()
-        cfg = acx._load_cfg()
-        with acx._client(cfg) as c:
-            data = acx._get(c, "targets")
-        targets = data.get("targets", []) if isinstance(data, dict) else []
+        client, acx, _ = _get_client()
+        targets = acx.fetch_targets(client)
         return {"targets": targets}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/scans")
-async def acx_scans(limit: int = 20):
-    """List recent Acunetix scans."""
+async def acx_scans():
+    """List Acunetix scans."""
     try:
-        acx = _get_acx()
-        cfg = acx._load_cfg()
-        with acx._client(cfg) as c:
-            data = acx._get(c, f"scans?l={limit}")
-        scans = data.get("scans", []) if isinstance(data, dict) else []
+        client, acx, _ = _get_client()
+        scans = acx.fetch_scans(client)
         return {"scans": scans}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/vulns")
-async def acx_vulns(scan_id: str = None, limit: int = 50):
-    """List vulnerabilities, optionally filtered by scan_id."""
-    try:
-        acx = _get_acx()
-        cfg = acx._load_cfg()
-        with acx._client(cfg) as c:
-            path = f"vulnerabilities?l={limit}"
-            if scan_id:
-                path += f"&scan_id={scan_id}"
-            data = acx._get(c, path)
-        vulns = data.get("vulnerabilities", []) if isinstance(data, dict) else []
-        return {"vulnerabilities": vulns}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/vulns/{scan_id}")
-async def acx_vulns_by_scan(scan_id: str, limit: int = 100):
+async def acx_vulns_by_scan(scan_id: str):
     """List vulnerabilities for a specific scan."""
     try:
-        acx = _get_acx()
-        cfg = acx._load_cfg()
-        with acx._client(cfg) as c:
-            data = acx._get(c, f"vulnerabilities?l={limit}&scan_id={scan_id}")
-        vulns = data.get("vulnerabilities", []) if isinstance(data, dict) else []
+        client, acx, _ = _get_client()
+        vulns = acx.fetch_vulnerabilities(client, scan_id)
         return {"vulnerabilities": vulns}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/scan-groups")
-async def acx_scan_groups():
-    """List Acunetix scan groups."""
+
+@router.get("/vuln-detail/{vuln_id}")
+async def acx_vuln_detail(vuln_id: str):
+    """Get full detail of a specific vulnerability."""
     try:
-        acx = _get_acx()
-        cfg = acx._load_cfg()
-        with acx._client(cfg) as c:
-            data = acx._get(c, "scan_groups")
-        groups = data.get("groups", []) if isinstance(data, dict) else []
-        return {"groups": groups}
+        client, acx, _ = _get_client()
+        detail = acx.fetch_vuln_detail(client, vuln_id)
+        return {"vulnerability": detail}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/profiles")
+async def acx_profiles():
+    """List Acunetix scan profiles."""
+    try:
+        client, acx, _ = _get_client()
+        profiles = acx.fetch_profiles(client)
+        return {"profiles": profiles}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/start-scan")
+async def acx_start_scan(body: dict):
+    """Start an Acunetix scan on a target."""
+    target_id = body.get("target_id")
+    profile_id = body.get("profile_id")
+    if not target_id:
+        raise HTTPException(status_code=400, detail="target_id required")
+    try:
+        client, acx, _ = _get_client()
+        result = acx.start_scan(client, target_id, profile_id)
+        return {"result": result}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -110,6 +110,27 @@ async def findings(
 
 
 @router.get("/findings/{scan_id}")
+@router.get("/finding/{finding_id}")
+async def finding_by_id(finding_id: str):
+    """Return a single finding by its ID."""
+    try:
+        conn = _db()
+        row = conn.execute(
+            "SELECT r.*, s.scanner as scan_scanner, s.domain as scan_domain "
+            "FROM results r LEFT JOIN scans s ON r.scan_id=s.id "
+            "WHERE r.id=? LIMIT 1", (finding_id,)
+        ).fetchone()
+        conn.close()
+        if not row:
+            return {"error": "Finding not found"}
+        d = dict(row)
+        d["severity"] = _infer_severity(d)
+        return {"finding": d}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/findings/{scan_id}")
 async def findings_detail(scan_id: str, limit: int = 200):
     """Get all findings for a specific scan, with summary stats."""
     try:

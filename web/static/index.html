@@ -863,9 +863,8 @@ function filterFindingsSev(sev) {
 // ── Finding Detail Drawer ─────────────────────────────────────
 async function openFindingDetail(findingId) {
   try {
-    const res = await api(`/api/results/findings?limit=1`);
-    const allFindings = res.findings||[];
-    const f = allFindings.find(x => String(x.id) === String(findingId));
+    const res = await api(`/api/results/finding/${findingId}`);
+    const f = res.finding;
     if (!f) return toast('Finding not found','warning');
 
     const sev = f.severity||'info';
@@ -1061,34 +1060,58 @@ async function viewAcxVulns(scanId) {
 // ═══════════════════════════════════════════════════════════════
 //  PAGE: AI Analysis
 // ═══════════════════════════════════════════════════════════════
+let aiProvidersCache = [];
+
 PAGES.ai = async function() {
   const c = $('pageContent');
   c.innerHTML = loading('Loading AI providers...');
   try {
     const res = await api('/api/ai/providers');
     const providers = res.providers||[];
+    aiProvidersCache = providers;
+    const hasAny = providers.some(p => p.configured);
+    const modelOptions = providers.filter(p => p.configured).map(p =>
+      (p.models||[]).map(m => `<option value="${m}">${esc(m)}</option>`)
+    ).flat().join('') || '<option value="">—</option>';
+
     c.innerHTML = `
     <div class="row">
       <div class="col">
+        <!-- ═══ AI HUNTING ═══ -->
+        <div class="card" style="border:1px solid var(--blue)">
+          <div class="card-header">🎯 AI Hunting <span class="badge badge-info">Automated</span></div>
+          <div class="card-body">
+            <div class="mb-1">
+              <label style="font-size:12px;color:var(--text-2);margin-bottom:4px;display:block">Target Domain</label>
+              <input id="huntDomain" placeholder="example.com">
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:12px">
+              <select id="huntProvider" style="flex:1">
+                ${providers.map(p => `<option value="${p.key}" ${!p.configured?'disabled':''}>${esc(p.label)} ${p.configured?'✓':'⚠ Not configured'}</option>`).join('')}
+              </select>
+              <select id="huntModel" style="flex:1">${modelOptions}</select>
+            </div>
+            <button class="btn btn-primary btn-lg" onclick="startAiHunt()" id="btnHunt" ${!hasAny?'disabled':''}>🎯 Start Hunt</button>
+            ${!hasAny ? '<div style="margin-top:8px;font-size:12px;color:var(--yellow)">⚠ No AI providers configured. Set API key in environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)</div>' : ''}
+          </div>
+        </div>
+        <!-- ═══ AI ANALYSIS ═══ -->
         <div class="card">
           <div class="card-header">🤖 AI Analysis</div>
           <div class="card-body">
-            <div class="mb-1">
-              <label style="font-size:12px;color:var(--text-2);margin-bottom:4px;display:block">Provider</label>
-              <select id="aiProvider">${providers.map(p => `<option value="${p.key}">${esc(p.label)} ${p.configured?'✓':'⚠ Not configured'}</option>`).join('')}</select>
-            </div>
-            <div class="mb-1">
-              <label style="font-size:12px;color:var(--text-2);margin-bottom:4px;display:block">Model</label>
-              <select id="aiModel">
-                ${providers.filter(p => p.configured).map(p => (p.models||[]).map(m => `<option value="${m}">${esc(m)}</option>`).join('')).join('')}
-                ${providers.filter(p => !p.configured).length === providers.length ? '<option value="">No providers configured</option>' : ''}
+            <div style="display:flex;gap:8px;margin-bottom:8px">
+              <select id="aiProvider" style="flex:1">
+                ${providers.map(p => `<option value="${p.key}" ${!p.configured?'disabled':''}>${esc(p.label)} ${p.configured?'✓':'⚠'}</option>`).join('')}
               </select>
+              <select id="aiModel" style="flex:1">${modelOptions}</select>
             </div>
-            <div class="mb-1">
-              <label style="font-size:12px;color:var(--text-2);margin-bottom:4px;display:block">Prompt / Context</label>
-              <textarea id="aiPrompt" rows="6" placeholder="Analyse these findings...&#10;Summarise vulnerabilities for example.com..."></textarea>
+            <textarea id="aiPrompt" rows="5" placeholder="Analyse these findings...&#10;Summarise vulnerabilities for example.com..."></textarea>
+            <div style="margin-top:8px" class="btn-group">
+              <button class="btn btn-primary" onclick="runAiAnalysis()">🤖 Analyse</button>
+              <button class="btn btn-secondary" onclick="document.getElementById('aiPrompt').value='List all vulnerabilities found and categorise by severity. Summarise the overall security posture.'">📋 Findings</button>
+              <button class="btn btn-secondary" onclick="document.getElementById('aiPrompt').value='Generate a penetration testing report structure including risk ratings and remediation steps.'">📄 Report</button>
+              <button class="btn btn-secondary" onclick="document.getElementById('aiPrompt').value='Extract all endpoints, API paths, and sensitive parameters from the scan output.'">🔗 Endpoints</button>
             </div>
-            <button class="btn btn-primary btn-lg" onclick="runAiAnalysis()">🤖 Analyse</button>
           </div>
         </div>
       </div>
@@ -1096,32 +1119,98 @@ PAGES.ai = async function() {
         <div class="card">
           <div class="card-header">🔑 Provider Status</div>
           <div class="card-body" style="padding:0">
-            <table><thead><tr><th>Provider</th><th>Status</th><th>Key</th></tr></thead><tbody>
+            <table><thead><tr><th>Provider</th><th>Status</th></tr></thead><tbody>
             ${providers.map(p => `<tr><td><strong>${esc(p.label)}</strong></td>
-            <td>${p.configured ? '<span class="badge badge-success">Configured</span>' : '<span class="badge badge-warning">Missing</span>'}</td>
-            <td class="text-muted">${p.masked||'—'}</td></tr>`).join('')}
+            <td>${p.configured ? '<span class="badge badge-success">✓ Configured</span>' : '<span class="badge badge-warning">⚠ Missing Key</span>'}</td></tr>`).join('')}
             </tbody></table>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-header">💡 Quick Prompts</div>
-          <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
-            <button class="btn btn-secondary" style="justify-content:flex-start" onclick="document.getElementById('aiPrompt').value='List all vulnerabilities found and categorise by severity. Summarise the overall security posture.'">Analyse findings</button>
-            <button class="btn btn-secondary" style="justify-content:flex-start" onclick="document.getElementById('aiPrompt').value='Generate a penetration testing report structure for the findings, including risk ratings and remediation steps.'">Generate report</button>
-            <button class="btn btn-secondary" style="justify-content:flex-start" onclick="document.getElementById('aiPrompt').value='Extract all endpoints, API paths, and sensitive parameters from the scan output.'">Extract endpoints</button>
+            <div style="padding:12px;font-size:11px;color:var(--text-2);border-top:1px solid var(--border)">
+              Set API keys via environment variables:<br>
+              <code>OPENAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>, <code>GEMINI_API_KEY</code>, <code>OPENROUTER_API_KEY</code>
+            </div>
           </div>
         </div>
       </div>
     </div>
+    <div id="aiHuntResults"></div>
     <div class="card">
-      <div class="card-header">📝 Analysis Result</div>
+      <div class="card-header">📝 Analysis Output</div>
       <div class="card-body" style="padding:0">
-        <div class="terminal" id="aiOutput" style="max-height:500px;border-radius:0;border:none"><span class="line muted">Run an analysis to see results...</span></div>
+        <div class="terminal" id="aiOutput" style="max-height:600px;border-radius:0;border:none"><span class="line muted">Run an analysis or hunt to see results...</span></div>
       </div>
     </div>`;
   } catch(e) { c.innerHTML = emptyState('❌','Error: '+esc(e.message)); }
 };
 
+// ── AI Hunt ──────────────────────────────────────────────────
+async function startAiHunt() {
+  const domain = $('huntDomain').value.trim().toLowerCase();
+  const provider = $('huntProvider').value;
+  const model = $('huntModel').value;
+  if(!domain) return toast('Enter a target domain','warning');
+
+  const btn = $('btnHunt');
+  btn.disabled = true;
+  btn.textContent = '⏳ Hunting...';
+
+  const resultsDiv = $('aiHuntResults');
+  resultsDiv.innerHTML = `<div class="card"><div class="card-body text-center"><div class="loading"><div class="spinner"></div><div style="margin-top:12px">🤖 AI is hunting vulnerabilities on <strong>${esc(domain)}</strong>...</div></div></div></div>`;
+  const out = $('aiOutput');
+  out.innerHTML = `<div class="line info">🎯 AI Hunting ${esc(domain)} via ${esc(provider)}/${esc(model)}...</div>`;
+
+  try {
+    const res = await api('/api/ai/hunt', {method:'POST',body:JSON.stringify({domain,provider,model})});
+    out.innerHTML += `<div class="line" style="color:var(--green);font-weight:600">✅ Hunt complete</div><div style="white-space:pre-wrap;padding-top:8px">${esc(res.result||'')}</div>`;
+
+    // Render structured findings if available
+    if (res.parsed && res.parsed.findings) {
+      const findings = res.parsed.findings;
+      const counts = {};
+      findings.forEach(f => { const s = (f.severity||'info').toLowerCase(); counts[s] = (counts[s]||0) + 1; });
+
+      let html = `<div class="card"><div class="card-header">🎯 AI Hunting Results — ${esc(domain)}</div><div class="card-body">`;
+      html += `<div class="stat-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px">
+        <div class="stat-card" style="border-top:3px solid var(--red)"><div class="stat-value" style="color:var(--red)">${counts.critical||0}</div><div class="stat-label">Critical</div></div>
+        <div class="stat-card" style="border-top:3px solid var(--orange)"><div class="stat-value" style="color:var(--orange)">${counts.high||0}</div><div class="stat-label">High</div></div>
+        <div class="stat-card" style="border-top:3px solid var(--yellow)"><div class="stat-value" style="color:var(--yellow)">${counts.medium||0}</div><div class="stat-label">Medium</div></div>
+        <div class="stat-card" style="border-top:3px solid var(--blue)"><div class="stat-value" style="color:var(--blue)">${counts.low||0}</div><div class="stat-label">Low</div></div>
+        <div class="stat-card"><div class="stat-value">${findings.length}</div><div class="stat-label">Total</div></div>
+      </div>`;
+
+      findings.forEach((f, i) => {
+        const sev = (f.severity||'info').toLowerCase();
+        const bClass = sev==='critical'?'badge-critical':sev==='high'?'badge-high':sev==='medium'?'badge-medium':'badge-info';
+        html += `<div class="card" style="background:var(--bg-3);margin-bottom:8px">
+          <div class="card-header" style="padding:10px 14px">
+            <span class="badge ${bClass}">${sev.toUpperCase()}</span>
+            <span style="margin-left:8px;font-weight:500">${esc(f.title||'Untitled')}</span>
+            <span class="badge badge-neutral" style="margin-left:auto">${esc(f.category||'other')}</span>
+          </div>
+          <div class="card-body" style="padding:10px 14px;font-size:13px">
+            ${f.cve ? `<div style="margin-bottom:6px"><span class="tag tag-red">CVE</span> <code>${esc(f.cve)}</code> <span class="badge ${f.likelihood==='high'?'badge-high':f.likelihood==='medium'?'badge-medium':'badge-info'}">${esc(f.likelihood||'medium')} likelihood</span></div>` : ''}
+            ${f.description ? `<div style="margin-bottom:6px"><span class="text-muted">Description:</span><br>${esc(f.description)}</div>` : ''}
+            ${f.remediation ? `<div style="margin-bottom:6px"><span class="text-muted" style="color:var(--green)">Remediation:</span><br>${esc(f.remediation)}</div>` : ''}
+            ${f.endpoints?.length ? `<div style="margin-top:6px"><span class="text-muted">Endpoints:</span><br>${f.endpoints.map(e => `<code style="background:var(--bg);padding:1px 6px;font-size:11px">${esc(e)}</code>`).join(' ')}</div>` : ''}
+          </div>
+        </div>`;
+      });
+      html += `</div></div>`;
+      resultsDiv.innerHTML = html;
+      toast(`Hunt complete — ${findings.length} findings`,'success');
+    } else {
+      resultsDiv.innerHTML = `<div class="card"><div class="card-header">🎯 Results — ${esc(domain)}</div><div class="card-body"><div class="terminal" style="max-height:300px">${esc(res.result||'')}</div></div></div>`;
+      toast('Hunt complete — no structured findings parsed','info');
+    }
+  } catch(e) {
+    out.innerHTML += `<div class="line error">Error: ${esc(e.message)}</div>`;
+    resultsDiv.innerHTML = `<div class="card"><div class="card-body" style="color:var(--red)">❌ ${esc(e.message)}</div></div>`;
+    toast('Hunt failed: '+e.message,'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🎯 Start Hunt';
+  }
+}
+
+// ── AI Analysis ──────────────────────────────────────────────
 async function runAiAnalysis() {
   const provider = $('aiProvider').value;
   const model = $('aiModel').value;
