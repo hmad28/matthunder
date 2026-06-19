@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>matthunder Web</title>
+<style>
+:root{color-scheme:dark;--bg:#1e1e1e;--panel:#252526;--panel-2:#2d2d30;--border:#3c3c3c;--muted:#9aa0a6;--text:#d4d4d4;--strong:#f3f3f3;--blue:#4aa5ff;--green:#6fcf97;--yellow:#d7ba7d;--red:#f48771;--focus:#007acc;--terminal:#111}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:"Segoe UI",system-ui,sans-serif;font-size:14px;min-height:100vh;display:flex}
+/* ─── sidebar ─── */
+nav{width:220px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+nav .logo{padding:20px 16px 12px;font-size:18px;font-weight:700;color:var(--strong);border-bottom:1px solid var(--border)}
+nav .logo span{color:var(--blue)}
+nav .nav-items{flex:1;overflow-y:auto}
+nav .nav-item{padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;color:var(--muted);border-left:3px solid transparent;transition:all .15s}
+nav .nav-item:hover{background:var(--panel-2);color:var(--text)}
+nav .nav-item.active{background:var(--panel-2);color:var(--strong);border-left-color:var(--blue)}
+nav .nav-item .icon{width:20px;text-align:center;font-size:16px}
+nav .status-bar{padding:12px 16px;border-top:1px solid var(--border);font-size:12px}
+nav .status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+nav .status-dot.idle{background:var(--muted)}
+nav .status-dot.running{background:var(--green);animation:pulse 1.2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+/* ─── main ─── */
+main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.topbar{height:48px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;flex-shrink:0}
+.topbar h2{font-size:16px;font-weight:600}
+.content{flex:1;overflow-y:auto;padding:20px}
+/* ─── cards ─── */
+.card{background:var(--panel);border:1px solid var(--border);border-radius:6px;margin-bottom:16px}
+.card-header{padding:12px 16px;border-bottom:1px solid var(--border);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.card-body{padding:16px}
+.card-body>:not(:last-child){margin-bottom:12px}
+/* ─── forms ─── */
+input,select,button{font-family:inherit;font-size:14px}
+input,select{background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:4px;outline:none;width:100%;transition:border-color .15s}
+input:focus,select:focus{border-color:var(--focus)}
+select{cursor:pointer}
+button{background:var(--blue);color:#fff;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-weight:500;transition:opacity .15s}
+button:hover{opacity:.85}
+button:disabled{opacity:.4;cursor:not-allowed}
+button.danger{background:var(--red)}
+button.secondary{background:var(--panel-2);color:var(--text);border:1px solid var(--border)}
+.btn-group{display:flex;gap:8px;flex-wrap:wrap}
+/* ─── grid ─── */
+.row{display:flex;gap:16px;flex-wrap:wrap}
+.col{flex:1;min-width:280px}
+/* ─── table ─── */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)}
+th{color:var(--muted);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.5px}
+tr:hover td{background:var(--panel-2)}
+/* ─── terminal ─── */
+.terminal{background:var(--terminal);border:1px solid var(--border);border-radius:4px;font-family:"Cascadia Code","Fira Code","Consolas",monospace;font-size:12px;padding:12px;max-height:400px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+.terminal .line{color:var(--green)}
+.terminal .line.info{color:var(--blue)}
+.terminal .line.warn{color:var(--yellow)}
+.terminal .line.error{color:var(--red)}
+.terminal .line.muted{color:var(--muted)}
+/* ─── badges ─── */
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.badge.blue{background:#1a3a5c;color:var(--blue)}
+.badge.green{background:#1a3a2a;color:var(--green)}
+.badge.yellow{background:#3a3a1a;color:var(--yellow)}
+.badge.red{background:#3a1a1a;color:var(--red)}
+/* ─── misc ─── */
+.hidden{display:none!important}
+.text-center{text-align:center}
+.text-muted{color:var(--muted)}
+.mt-1{margin-top:12px}
+.mb-1{margin-bottom:12px}
+.flex{display:flex;gap:8px;align-items:center}
+.flex-1{flex:1}
+.loading{text-align:center;padding:40px;color:var(--muted)}
+.loading .spinner{display:inline-block;width:24px;height:24px;border:3px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+pre{font-family:inherit}
+a{color:var(--blue);text-decoration:none}
+a:hover{text-decoration:underline}
+/* ─── pipeline steps ─── */
+.pipeline-step{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
+.pipeline-step:last-child{border-bottom:none}
+.pipeline-step .step-status{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0}
+.pipeline-step.done .step-status{background:var(--green);color:#000}
+.pipeline-step.running .step-status{background:var(--blue);animation:pulse 1.2s infinite}
+.pipeline-step.pending .step-status{background:var(--panel-2);color:var(--muted)}
+.pipeline-step .step-label{flex:1}
+@media(max-width:768px){nav{width:60px}nav .logo{font-size:14px;padding:12px 8px}nav .nav-item{padding:12px 8px;justify-content:center}nav .nav-item span{display:none}nav .status-bar{font-size:10px;padding:8px}}
+</style>
+</head>
+<body>
+
+<!-- sidebar -->
+<nav id="sidebar">
+  <div class="logo">mat<span>thunder</span></div>
+  <div class="nav-items">
+    <div class="nav-item active" data-page="dashboard"><span class="icon">📊</span><span>Dashboard</span></div>
+    <div class="nav-item" data-page="deepscan"><span class="icon">🚀</span><span>Deep Scan</span></div>
+    <div class="nav-item" data-page="scanners"><span class="icon">🔍</span><span>Scanners</span></div>
+    <div class="nav-item" data-page="pipeline"><span class="icon">🧬</span><span>Pipeline</span></div>
+    <div class="nav-item" data-page="targets"><span class="icon">🎯</span><span>Targets</span></div>
+    <div class="nav-item" data-page="results"><span class="icon">📈</span><span>Results</span></div>
+    <div class="nav-item" data-page="config"><span class="icon">⚙️</span><span>Config</span></div>
+  </div>
+  <div class="status-bar"><span class="status-dot idle" id="statusDot"></span><span id="statusText">Idle</span></div>
+</nav>
+
+<!-- main -->
+<main>
+  <div class="topbar"><h2 id="pageTitle">Dashboard</h2></div>
+  <div class="content" id="pageContent">
+
+    <!-- ─── Dashboard ─── -->
+    <div id="page-dashboard">
+      <div class="row">
+        <div class="col"><div class="card"><div class="card-header">📊 Quick Stats</div><div class="card-body" id="statsBody">
+          <div class="loading"><div class="spinner"></div></div>
+        </div></div></div>
+        <div class="col"><div class="card"><div class="card-header">🚀 Quick Actions</div><div class="card-body">
+          <button onclick="switchPage('deepscan')">🔍 Start Deep Scan</button>
+          <button class="secondary" onclick="switchPage('targets')" style="margin-top:8px">🎯 Manage Targets</button>
+          <button class="secondary" onclick="switchPage('scanners')" style="margin-top:8px">🔍 Run Scanner</button>
+        </div></div></div>
+      </div>
+      <div class="card"><div class="card-header">📋 Recent Scan History</div><div class="card-body" id="scanHistory">
+        <div class="loading"><div class="spinner"></div></div>
+      </div></div>
+    </div>
+
+    <!-- ─── Deep Scan ─── -->
+    <div id="page-deepscan" class="hidden">
+      <div class="row">
+        <div class="col"><div class="card"><div class="card-header">▶ Start Scan</div><div class="card-body">
+          <div class="flex" style="margin-bottom:12px">
+            <input id="scanTarget" placeholder="example.com" style="flex:1">
+            <select id="scanSpeed" style="width:120px">
+              <option value="low">Low</option>
+              <option value="standard" selected>Standard</option>
+              <option value="fast">Fast</option>
+            </select>
+          </div>
+          <div class="btn-group">
+            <button id="btnScanStart" onclick="startScan()">🚀 Start Deep Scan</button>
+            <button id="btnScanStop" class="danger" onclick="stopScan()" disabled>⛔ Stop</button>
+          </div>
+        </div></div></div>
+        <div class="col"><div class="card"><div class="card-header">📡 Status</div><div class="card-body">
+          <div id="scanStatus">Idle</div>
+        </div></div></div>
+      </div>
+      <div class="card"><div class="card-header">📜 Live Log</div><div class="card-body">
+        <div class="terminal" id="scanLog"><span class="line muted">Waiting for scan...</span></div>
+      </div></div>
+    </div>
+
+    <!-- ─── Scanners ─── -->
+    <div id="page-scanners" class="hidden">
+      <div class="row">
+        <div class="col"><div class="card"><div class="card-header">▶ Run Scanner</div><div class="card-body">
+          <select id="scannerSelect" style="margin-bottom:8px"></select>
+          <input id="scannerTarget" placeholder="example.com" style="margin-bottom:8px">
+          <button onclick="runInlineScanner()">🔍 Run Scanner</button>
+        </div></div></div>
+        <div class="col"><div class="card"><div class="card-header">📋 Available Scanners</div><div class="card-body" id="scannerList">
+          <div class="loading"><div class="spinner"></div></div>
+        </div></div></div>
+      </div>
+      <div class="card"><div class="card-header">📜 Scanner Output</div><div class="card-body">
+        <div class="terminal" id="scannerOutput"><span class="line muted">Run a scanner to see output...</span></div>
+      </div></div>
+    </div>
+
+    <!-- ─── Pipeline ─── -->
+    <div id="page-pipeline" class="hidden">
+      <div class="card"><div class="card-header">🧬 6-Phase Pipeline</div><div class="card-body">
+        <div class="flex" style="margin-bottom:12px">
+          <input id="pipelineTarget" placeholder="example.com" style="flex:1">
+          <button onclick="startPipeline()">▶ Start Pipeline</button>
+        </div>
+        <div id="pipelineSteps"></div>
+      </div></div>
+      <div class="card"><div class="card-header">📜 Pipeline Log</div><div class="card-body">
+        <div class="terminal" id="pipelineLog"><span class="line muted">Ready</span></div>
+      </div></div>
+    </div>
+
+    <!-- ─── Targets ─── -->
+    <div id="page-targets" class="hidden">
+      <div class="card"><div class="card-header">➕ Add Target</div><div class="card-body">
+        <div class="flex">
+          <input id="addTargetInput" placeholder="example.com" style="flex:1">
+          <button onclick="addTarget()">Add</button>
+        </div>
+      </div></div>
+      <div class="card"><div class="card-header">📋 Target List</div><div class="card-body" id="targetList">
+        <div class="loading"><div class="spinner"></div></div>
+      </div></div>
+    </div>
+
+    <!-- ─── Results ─── -->
+    <div id="page-results" class="hidden">
+      <div class="card"><div class="card-header">📋 Scan History</div><div class="card-body" id="resultsScans">
+        <div class="loading"><div class="spinner"></div></div>
+      </div></div>
+      <div class="card"><div class="card-header">📄 Nuclei Output</div><div class="card-body" id="resultsNuclei">
+        <div class="loading"><div class="spinner"></div></div>
+      </div></div>
+      <div class="card"><div class="card-header">📁 Reports</div><div class="card-body" id="resultsReports">
+        <div class="loading"><div class="spinner"></div></div>
+      </div></div>
+    </div>
+
+    <!-- ─── Config ─── -->
+    <div id="page-config" class="hidden">
+      <div class="card"><div class="card-header">⚙️ Configuration</div><div class="card-body" id="configBody">
+        <div class="loading"><div class="spinner"></div></div>
+      </div></div>
+      <div class="card"><div class="card-header">📁 Output Directories</div><div class="card-body" id="outputDirsBody">
+        <div class="loading"><div class="spinner"></div></div>
+      </div></div>
+    </div>
+
+  </div>
+</main>
+
+<script>
+const API = window.location.origin;
+
+// ─── Navigation ────────────────────────────────────────────────
+function switchPage(name) {
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.page === name));
+  document.querySelectorAll('.content>div[id^="page-"]').forEach(el => el.classList.add('hidden'));
+  const page = document.getElementById('page-'+name);
+  if (page) page.classList.remove('hidden');
+  const titles = {dashboard:'Dashboard',deepscan:'Deep Scan',scanners:'Inline Scanners',
+    pipeline:'Pipeline',targets:'Targets',results:'Results',config:'Configuration'};
+  document.getElementById('pageTitle').textContent = titles[name] || name;
+}
+document.querySelectorAll('.nav-item').forEach(el => {
+  el.addEventListener('click', () => { switchPage(el.dataset.page); refreshPage(el.dataset.page); });
+});
+
+function refreshPage(name) {
+  if (name === 'dashboard') loadDashboard();
+  if (name === 'scanners') loadScannerList();
+  if (name === 'targets') loadTargets();
+  if (name === 'results') loadResults();
+  if (name === 'config') loadConfig();
+}
+
+// ─── API helper ─────────────────────────────────────────────────
+async function api(path, opts={}) {
+  const res = await fetch(API+path, {headers:{'Content-Type':'application/json',...opts.headers},...opts});
+  if (opts.raw) return res;
+  return res.json();
+}
+
+// ─── Status poll ────────────────────────────────────────────────
+async function pollStatus() {
+  const s = await api('/api/scans/status');
+  const dot = document.getElementById('statusDot');
+  const txt = document.getElementById('statusText');
+  if (s.running) {
+    dot.className = 'status-dot running';
+    txt.textContent = s.target ? `Scan: ${s.target}` : 'Running';
+  } else {
+    dot.className = 'status-dot idle';
+    txt.textContent = 'Idle';
+  }
+  // Update scan page buttons
+  const btnStart = document.getElementById('btnScanStart');
+  const btnStop = document.getElementById('btnScanStop');
+  if (btnStart) { btnStart.disabled = s.running; }
+  if (btnStop) { btnStop.disabled = !s.running; }
+  if (!s.running && document.getElementById('scanStatus')) {
+    document.getElementById('scanStatus').innerHTML = `<span class="text-muted">Idle</span>`;
+  }
+}
+setInterval(pollStatus, 3000); pollStatus();
+
+// ─── Dashboard ──────────────────────────────────────────────────
+async function loadDashboard() {
+  try {
+    const [status, history, nuclei, reports] = await Promise.all([
+      api('/api/scans/status'),
+      api('/api/results/scans?limit=5'),
+      api('/api/results/nuclei'),
+      api('/api/results/reports'),
+    ]);
+    document.getElementById('statsBody').innerHTML = `
+      <div class="flex"><span class="text-muted">Status:</span> ${status.running ? '<span class="badge green">Running</span>' : '<span class="badge blue">Idle</span>'} ${status.target ? `— ${status.target}` : ''}</div>
+      <div class="flex"><span class="text-muted">Scans in DB:</span> ${history.scans?.length || 0}</div>
+      <div class="flex"><span class="text-muted">Nuclei files:</span> ${nuclei.files?.length || 0}</div>
+      <div class="flex"><span class="text-muted">Reports:</span> ${reports.reports?.length || 0}</div>
+    `;
+    const tbody = document.getElementById('scanHistory');
+    if (!history.scans?.length) { tbody.innerHTML = '<div class="text-muted">No scan history yet.</div>'; return; }
+    let html = '<table><thead><tr><th>ID</th><th>Scanner</th><th>Domain</th><th>Status</th><th>Date</th></tr></thead><tbody>';
+    history.scans.forEach(s => {
+      html += `<tr><td>${(s.id||'').slice(0,8)}</td><td>${s.scanner||'-'}</td><td>${s.domain||'-'}</td>
+        <td><span class="badge ${s.status==='completed'?'green':s.status==='failed'?'red':s.status==='running'?'green':'yellow'}">${s.status||'-'}</span></td>
+        <td>${(s.created_at||'').slice(0,19).replace('T',' ')}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    tbody.innerHTML = html;
+  } catch(e) { document.getElementById('statsBody').innerHTML = `<span class="text-muted">Error loading: ${e.message}</span>`; }
+}
+
+// ─── Deep Scan ──────────────────────────────────────────────────
+let scanWs = null;
+
+async function startScan() {
+  const target = document.getElementById('scanTarget').value.trim();
+  const speed = document.getElementById('scanSpeed').value;
+  if (!target) return alert('Enter a target domain');
+  const statusDiv = document.getElementById('scanStatus');
+  const logDiv = document.getElementById('scanLog');
+  logDiv.innerHTML = '';
+  statusDiv.innerHTML = '<span class="text-muted">Starting scan...</span>';
+
+  const res = await api('/api/scans/start', {method:'POST',body:JSON.stringify({target,speed})});
+  if (res.error) { statusDiv.innerHTML = `<span style="color:var(--red)">Error: ${res.error}</span>`; return; }
+  statusDiv.innerHTML = `▶ PID: ${res.pid} | Target: ${res.target}`;
+
+  // Connect WebSocket for live log
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  scanWs = new WebSocket(proto + '//' + window.location.host + '/api/scans/ws/log');
+  scanWs.onmessage = e => {
+    const line = document.createElement('div');
+    line.className = 'line';
+    line.textContent = e.data;
+    logDiv.appendChild(line);
+    logDiv.scrollTop = logDiv.scrollHeight;
+    statusDiv.innerHTML = e.data;
+  };
+  scanWs.onclose = () => { scanWs = null; pollStatus(); };
+}
+
+async function stopScan() {
+  await api('/api/scans/stop', {method:'POST'});
+  if (scanWs) { scanWs.close(); scanWs = null; }
+  document.getElementById('scanLog').innerHTML += '<div class="line warn">⛔ Scan stopped</div>';
+  pollStatus();
+}
+
+// ─── Scanners ───────────────────────────────────────────────────
+async function loadScannerList() {
+  const res = await api('/api/scans/scanner-list');
+  const select = document.getElementById('scannerSelect');
+  const listDiv = document.getElementById('scannerList');
+  if (!res.scanners?.length) { listDiv.innerHTML = '<span class="text-muted">No scanners available</span>'; return; }
+  select.innerHTML = res.scanners.map(s => `<option value="${s.key}">${s.label}</option>`).join('');
+  let html = '<table><thead><tr><th>Key</th><th>Name</th></tr></thead><tbody>';
+  res.scanners.forEach(s => { html += `<tr><td><span class="badge blue">${s.key}</span></td><td>${s.label}</td></tr>`; });
+  html += '</tbody></table>';
+  listDiv.innerHTML = html;
+}
+
+async function runInlineScanner() {
+  const scanner = document.getElementById('scannerSelect').value;
+  const domain = document.getElementById('scannerTarget').value.trim();
+  if (!domain) return alert('Enter a target domain');
+  const output = document.getElementById('scannerOutput');
+  output.innerHTML = `<div class="line">Running ${scanner} on ${domain}...</div>`;
+  const res = await api('/api/scans/scanner-run', {method:'POST',body:JSON.stringify({scanner,domain})});
+  const findings = res.findings || res.links_found || res.links_checked || res.endpoints || res.params || res.probes || 0;
+  output.innerHTML += `<div class="line ${res.error?'error':'info'}">${res.error ? 'Error: '+res.error : 'Done — '+findings+' findings'}</div>`;
+}
+
+// ─── Pipeline ───────────────────────────────────────────────────
+async function startPipeline() {
+  const domain = document.getElementById('pipelineTarget').value.trim();
+  if (!domain) return alert('Enter a target');
+  const steps = [
+    {key:'passive',label:'Passive Recon (subfinder → assetfinder)'},
+    {key:'active',label:'Active Recon (httpx → portscan → WAF)'},
+    {key:'discovery',label:'Content Discovery (gau → katana → JS → fuzzing)'},
+    {key:'nuclei',label:'Automated Scanning (Nuclei)'},
+    {key:'vulnscan',label:'Vulnerability Scan (SQLi → XSS → LFI → CORS → SSTI)'},
+    {key:'intel',label:'Intel & Discovery (BLH → 3rd Party → Cred URLs)'},
+  ];
+  const container = document.getElementById('pipelineSteps');
+  const log = document.getElementById('pipelineLog');
+  log.innerHTML = `<div class="line">Starting pipeline for ${domain}...</div>`;
+
+  // Show steps
+  container.innerHTML = steps.map(s => `
+    <div class="pipeline-step pending" id="pstep-${s.key}">
+      <div class="step-status">⬜</div>
+      <div class="step-label">${s.label}</div>
+    </div>
+  `).join('');
+
+  const res = await api('/api/scans/pipeline-run', {method:'POST',body:JSON.stringify({domain})});
+  steps.forEach(s => {
+    const el = document.getElementById('pstep-'+s.key);
+    if (el) { el.className = 'pipeline-step done'; el.querySelector('.step-status').textContent = '✓'; }
+  });
+  log.innerHTML += '<div class="line info">Pipeline complete.</div>';
+}
+
+// ─── Targets ────────────────────────────────────────────────────
+async function loadTargets() {
+  const res = await api('/api/targets/');
+  const div = document.getElementById('targetList');
+  if (!res.targets?.length) { div.innerHTML = '<span class="text-muted">No targets yet.</span>'; return; }
+  let html = '<table><thead><tr><th>Target</th><th>Notes</th><th>Created</th><th></th></tr></thead><tbody>';
+  res.targets.forEach(t => {
+    const name = t.addresses?.[0] || t.name || '-';
+    html += `<tr><td><strong>${name}</strong></td><td>${t.notes||'-'}</td><td>${(t.created_at||'').slice(0,10)}</td>
+      <td><button class="danger" style="padding:4px 8px;font-size:12px" onclick="deleteTarget('${name}')">✕</button></td></tr>`;
+  });
+  html += '</tbody></table>';
+  div.innerHTML = html;
+}
+async function addTarget() {
+  const target = document.getElementById('addTargetInput').value.trim();
+  if (!target) return alert('Enter a target');
+  const res = await api('/api/targets/', {method:'POST',body:JSON.stringify({target})});
+  if (res.error) return alert(res.error);
+  document.getElementById('addTargetInput').value = '';
+  loadTargets();
+}
+async function deleteTarget(name) {
+  if (!confirm(`Remove ${name}?`)) return;
+  await api('/api/targets/'+encodeURIComponent(name), {method:'DELETE'});
+  loadTargets();
+}
+
+// ─── Results ────────────────────────────────────────────────────
+async function loadResults() {
+  const [scansRes, nucleiRes, reportsRes] = await Promise.all([
+    api('/api/results/scans?limit=20'),
+    api('/api/results/nuclei'),
+    api('/api/results/reports'),
+  ]);
+  // Scans
+  const scansDiv = document.getElementById('resultsScans');
+  if (scansRes.scans?.length) {
+    let html = '<table><thead><tr><th>Scan ID</th><th>Scanner</th><th>Domain</th><th>Status</th><th>Findings</th><th>Date</th></tr></thead><tbody>';
+    scansRes.scans.forEach(s => {
+      html += `<tr><td>${(s.id||'').slice(0,8)}</td><td>${s.scanner||'-'}</td><td>${s.domain||'-'}</td>
+        <td><span class="badge ${s.status==='completed'?'green':s.status==='failed'?'red':'yellow'}">${s.status||'-'}</span></td>
+        <td>${s.total_links||0}</td><td>${(s.created_at||'').slice(0,19).replace('T',' ')}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    scansDiv.innerHTML = html;
+  } else { scansDiv.innerHTML = '<span class="text-muted">No scan history.</span>'; }
+
+  // Nuclei
+  const nucDiv = document.getElementById('resultsNuclei');
+  if (nucleiRes.files?.length) {
+    let html = '<table><thead><tr><th>File</th><th>Findings</th></tr></thead><tbody>';
+    nucleiRes.files.slice(0,10).forEach(f => {
+      html += `<tr><td>${f.file}</td><td><span class="badge blue">${f.findings_count}</span></td></tr>`;
+      if (f.findings?.length) {
+        f.findings.slice(0,5).forEach(ln => { html += `<tr><td colspan="2" style="padding:4px 12px;font-size:11px;color:var(--muted)">${ln}</td></tr>`; });
+      }
+    });
+    html += '</tbody></table>';
+    nucDiv.innerHTML = html;
+  } else { nucDiv.innerHTML = '<span class="text-muted">No nuclei output yet.</span>'; }
+
+  // Reports
+  const repDiv = document.getElementById('resultsReports');
+  if (reportsRes.reports?.length) {
+    let html = '<table><thead><tr><th>Name</th><th>Type</th><th>Size</th><th></th></tr></thead><tbody>';
+    reportsRes.reports.forEach(r => {
+      html += `<tr><td>${r.name}</td><td><span class="badge blue">${r.type}</span></td><td>${(r.size/1024).toFixed(1)} KB</td>
+        <td><a href="/api/results/reports/${encodeURIComponent(r.name)}" target="_blank">Open</a></td></tr>`;
+    });
+    html += '</tbody></table>';
+    repDiv.innerHTML = html;
+  } else { repDiv.innerHTML = '<span class="text-muted">No reports yet.</span>'; }
+}
+
+// ─── Config ─────────────────────────────────────────────────────
+async function loadConfig() {
+  try {
+    const [cfg, dirs] = await Promise.all([api('/api/config/'), api('/api/config/output-dirs')]);
+    const cfgDiv = document.getElementById('configBody');
+    if (cfg.config) {
+      let html = '<table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>';
+      Object.entries(cfg.config).forEach(([k,v]) => { html += `<tr><td>${k}</td><td>${v||'<span class="text-muted">—</span>'}</td></tr>`; });
+      html += '</tbody></table>';
+      cfgDiv.innerHTML = html;
+    }
+    const dirDiv = document.getElementById('outputDirsBody');
+    if (dirs.dirs) {
+      let html = '<table><thead><tr><th>Folder</th><th>Files</th></tr></thead><tbody>';
+      Object.entries(dirs.dirs).forEach(([k,v]) => {
+        html += `<tr><td><strong>${k}</strong></td><td>${v.count}</td></tr>`;
+      });
+      html += '</tbody></table>';
+      dirDiv.innerHTML = html;
+    }
+  } catch(e) {
+    document.getElementById('configBody').innerHTML = `<span class="text-muted">Error: ${e.message}</span>`;
+  }
+}
+
+// ─── Init ───────────────────────────────────────────────────────
+loadDashboard();
+</script>
+</body>
+</html>
