@@ -31,10 +31,11 @@ PROBE_ORIGINS = [
 ]
 
 
-def _classify(acao: str, acac: str, origin_sent: str) -> str:
+def _classify(acao: str, acac: str, origin_sent: str, vary_origin: str = "") -> str:
     acao_l = (acao or "").strip()
     acac_l = (acac or "").strip().lower()
     origin_l = (origin_sent or "").strip().lower()
+    vary_l = (vary_origin or "").strip().lower()
     if not acao_l:
         return "no_acao"
     if acao_l == "*":
@@ -44,15 +45,26 @@ def _classify(acao: str, acac: str, origin_sent: str) -> str:
     if acao_l.lower() == origin_l:
         if acac_l == "true":
             return "reflected_with_credentials"
+        # Check if Vary: Origin is set — without it, CDN/cache may serve reflected origin
+        if vary_l and "origin" in vary_l:
+            return "reflected_dynamic"
         return "reflected"
     if acao_l == "null" and origin_l == "null":
         if acac_l == "true":
             return "null_with_credentials"
         return "null_origin"
-    if origin_l.endswith(acao_l.lstrip("*").lstrip(".")):
-        if acac_l == "true":
-            return "regex_bypass_with_credentials"
-        return "regex_bypass"
+    # Subdomain regex bypass: check if ACAO matches a wildcard pattern for the origin
+    # e.g., ACAO=*.example.com, origin=https://sub.example.com
+    if origin_l.startswith("https://") or origin_l.startswith("http://"):
+        origin_host = origin_l.split("//", 1)[1].split("/")[0]
+        acao_host = acao_l.split("//", 1)[1].split("/")[0] if "//" in acao_l else acao_l
+        if acao_host.startswith("*."):
+            # Wildcard subdomain pattern — check if origin matches
+            suffix = acao_host[1:]  # .example.com
+            if origin_host.endswith(suffix):
+                if acac_l == "true":
+                    return "regex_bypass_with_credentials"
+                return "regex_bypass"
     return "ok"
 
 
@@ -61,7 +73,7 @@ def _load_pipeline_urls() -> list[str]:
     url_file = os.environ.get("MT_PIPELINE_URLS", "")
     if url_file and os.path.exists(url_file):
         with open(url_file, encoding="utf-8", errors="ignore") as f:
-            return [l.strip().split("?")[0] for l in f if l.strip().startswith("http")]
+            return [l.strip() for l in f if l.strip().startswith("http")]
     return []
 
 
@@ -105,10 +117,11 @@ def run(domain: str, max_pages: int = 30) -> dict:
                 tested += 1
                 acao = r.headers.get("access-control-allow-origin", "")
                 acac = r.headers.get("access-control-allow-credentials", "")
-                verdict = _classify(acao, acac, origin)
+                vary = r.headers.get("vary", "")
+                verdict = _classify(acao, acac, origin, vary)
                 if verdict in ("reflected_with_credentials", "null_with_credentials",
                                "wildcard_with_credentials", "regex_bypass_with_credentials",
-                               "reflected", "null_origin", "regex_bypass"):
+                               "reflected_dynamic", "null_origin", "regex_bypass"):
                     findings.append({
                         "url": page_url,
                         "origin": origin,
@@ -116,6 +129,31 @@ def run(domain: str, max_pages: int = 30) -> dict:
                         "acac": acac,
                         "verdict": verdict,
                     })
+                # Also test preflight (OPTIONS) for endpoints that may only set CORS there
+                if verdict in ("no_acao", "ok"):
+                    try:
+                        preflight_headers = {
+                            "Origin": origin,
+                            "Access-Control-Request-Method": "GET",
+                            "Access-Control-Request-Headers": "Authorization",
+                        }
+                        r2 = client.options(page_url, headers=preflight_headers, timeout=DEFAULT_TIMEOUT)
+                        pre_acao = r2.headers.get("access-control-allow-origin", "")
+                        pre_acac = r2.headers.get("access-control-allow-credentials", "")
+                        pre_vary = r2.headers.get("vary", "")
+                        pre_verdict = _classify(pre_acao, pre_acac, origin, pre_vary)
+                        if pre_verdict in ("reflected_with_credentials", "null_with_credentials",
+                                            "wildcard_with_credentials", "regex_bypass_with_credentials",
+                                            "reflected_dynamic", "null_origin", "regex_bypass"):
+                            findings.append({
+                                "url": page_url,
+                                "origin": origin,
+                                "acao": pre_acao,
+                                "acac": pre_acac,
+                                "verdict": f"preflight_{pre_verdict}",
+                            })
+                    except Exception:
+                        pass
 
     seen = set()
     unique = []

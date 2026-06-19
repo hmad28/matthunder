@@ -258,7 +258,7 @@ def analyze_stage_flow_from_log():
     return result
 
 
-def build_stage_checklist(max_items: int = 17):
+def build_stage_checklist(max_items: int = 20):
     analysis = analyze_stage_flow_from_log()
     completed = analysis["completed"]
     current_index = analysis["current_index"]
@@ -281,11 +281,16 @@ def build_stage_checklist(max_items: int = 17):
 
 def update_scan_step_from_log_tail(max_lines: int = 80):
     lines, pct, analysis = build_stage_checklist()
+    prev_step = active_scan.get("step")
     active_scan["progress_pct"] = pct
     if analysis.get("last_stage_line"):
-        active_scan["step"] = analysis["last_stage_line"]
+        new_step = analysis["last_stage_line"]
+        if new_step != prev_step:
+            active_scan["step_started_at"] = time.time()
+        active_scan["step"] = new_step
         active_scan["step_detail"] = "Mengikuti urutan tahapan asli matthunder."
-        active_scan["last_log_line"] = analysis["last_stage_line"]
+        active_scan["last_log_line"] = new_step
+        _save_scan_state()
         return
 
     log_path = active_scan.get("log_path")
@@ -298,10 +303,13 @@ def update_scan_step_from_log_tail(max_lines: int = 80):
     for line in reversed(raw_lines):
         step, pct2, raw = detect_scan_step_from_line(line)
         if step:
+            if step != prev_step:
+                active_scan["step_started_at"] = time.time()
             active_scan["step"] = step
             active_scan["step_detail"] = "Mengikuti tahapan/output asli dari matthunder."
             active_scan["progress_pct"] = pct2
             active_scan["last_log_line"] = raw
+            _save_scan_state()
             return
 
 
@@ -1724,8 +1732,14 @@ def build_status_text() -> str:
     detail = active_scan.get("step_detail") or "Scan sedang berjalan."
     log_name = Path(active_scan.get("log_path")).name if active_scan.get("log_path") else "-"
     pct_now = int(active_scan.get("progress_pct") or 0)
+    step_age = int(time.time() - (active_scan.get("step_started_at") or started))
     stuck_warn = ""
-    if duration > 300 and pct_now < 30:
+    if step_age > 600 and pct_now < 100:
+        stuck_warn = (
+            f"\n\n⚠️ _Step '{step[:60]}' udah jalan {step_age//60} menit tanpa update._\n"
+            "_Bisa stuck. Klik ⛔ Stop kalau perlu._"
+        )
+    elif duration > 300 and pct_now < 30:
         stuck_warn = (
             f"\n\n⚠️ _Scan udah {duration}s tapi progress < 30%._\n"
             "_Kemungkinan hang di tool eksternal. Klik 📄 View Log atau ⛔ Stop._"
@@ -1739,6 +1753,7 @@ def build_status_text() -> str:
         f"🎯 Target: {target}\n"
         f"⏱ Running: {duration}s\n"
         f"📍 Step: {step}\n"
+        f"🕐 Step age: {step_age}s\n"
         f"📊 Progress: {progress_bar_for_step(step)}\n"
         f"📝 {detail}\n"
         f"📄 Log: `{log_name}`"
@@ -1845,13 +1860,23 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("✅ Tidak ada scan berjalan.")
         else:
             try:
-                p.terminate()
-                await asyncio.sleep(3)
-                if p.returncode is None:
-                    p.kill()
+                await query.message.reply_text("⛔ Menghentikan scan + child process (nuclei dll)…")
+                _kill_proc_tree(p, grace_s=4.0)
+                active_scan.update({"process": None, "target": None, "started_at": None, "step": "Idle", "step_detail": "Belum ada scan berjalan.", "progress_pct": 0, "step_started_at": None})
+                _clear_scan_state()
                 await query.message.reply_text("⛔ Scan dihentikan.")
             except Exception as e:
                 await query.message.reply_text(f"❌ Gagal stop scan: {e}")
+    elif data == "menu_orphan_kill":
+        orphans = _find_orphan_scans()
+        if not orphans:
+            return await query.message.reply_text("✅ Tidak ada orphan process.", reply_markup=main_menu_keyboard())
+        for o in orphans:
+            _kill_pid_tree(o["pid"])
+        await query.message.reply_text(
+            f"🧹 Killed {len(orphans)} orphan process(es). Sekarang bersih.",
+            reply_markup=main_menu_keyboard(),
+        )
     elif data.startswith("speed:"):
         _, target, speed = data.split(":", 2)
         await start_deep_scan(query.message, context, target, speed)
@@ -2534,8 +2559,12 @@ async def start_deep_scan(message_obj, context: ContextTypes.DEFAULT_TYPE, targe
         "step_detail": "Menunggu output tahap pertama dari matthunder.",
         "progress_pct": 5,
         "last_log_line": "",
+        "step_started_at": time.time(),
     })
+    _save_scan_state()
+    _write_heartbeat()
     context.application.create_task(watch_scan(message_obj.chat_id, proc, target, log_file))
+    context.application.create_task(_heartbeat_loop())
 
 
 async def deep(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2549,7 +2578,257 @@ async def deep(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start_deep_scan(update.message, context, target, speed)
 
 
+HEARTBEAT_PATH = Path(os.getenv("TEMP", "/tmp")) / "matthunder_bot.heartbeat"
+SCAN_STATE_PATH = ROOT / "bot_logs" / "active_scan.json"
+SCAN_STATE_TMP = ROOT / "bot_logs" / "active_scan.json.tmp"
+
+
+def _write_heartbeat():
+    """Refresh heartbeat file so run_bot.bat knows bot is alive."""
+    try:
+        HEARTBEAT_PATH.write_text(str(int(time.time())), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _save_scan_state():
+    """Persist active_scan to disk so it survives bot restart.
+
+    The 'process' object isn't serializable; we record its PID and
+    reconstruct the reference after a restart by re-checking whether the
+    PID is still alive (or attach a fresh asyncio.subprocess.Process).
+    """
+    try:
+        import json as _json
+        proc = active_scan.get("process")
+        pid = getattr(proc, "pid", None) if proc else None
+        payload = {
+            "target": active_scan.get("target"),
+            "started_at": active_scan.get("started_at"),
+            "log_path": active_scan.get("log_path"),
+            "message_id": active_scan.get("message_id"),
+            "step": active_scan.get("step", "Idle"),
+            "step_detail": active_scan.get("step_detail", "Belum ada scan berjalan."),
+            "progress_pct": active_scan.get("progress_pct", 0),
+            "last_log_line": active_scan.get("last_log_line", ""),
+            "step_started_at": active_scan.get("step_started_at"),
+            "process_pid": pid,
+            "process_alive": proc is not None and getattr(proc, "returncode", 1) is None,
+        }
+        SCAN_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        text = _json.dumps(payload, ensure_ascii=False, default=str)
+        SCAN_STATE_TMP.write_text(text, encoding="utf-8")
+        SCAN_STATE_TMP.replace(SCAN_STATE_PATH)
+    except Exception as e:
+        logger.warning("save_scan_state failed: %s", e)
+
+
+def _clear_scan_state():
+    """Remove the persisted scan state (e.g. when scan finished)."""
+    try:
+        if SCAN_STATE_PATH.exists():
+            SCAN_STATE_PATH.unlink()
+        if SCAN_STATE_TMP.exists():
+            SCAN_STATE_TMP.unlink()
+    except Exception:
+        pass
+
+
+def _pid_alive(pid) -> bool:
+    """Return True if a PID is still a live process (best-effort on Windows)."""
+    if not pid:
+        return False
+    try:
+        import subprocess as _sp
+        rc = _sp.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return str(pid) in rc.stdout
+    except Exception:
+        return False
+
+
+def _kill_pid_tree(pid):
+    """Best-effort process tree kill on Windows."""
+    if not pid:
+        return
+    try:
+        import subprocess as _sp
+        _sp.run(
+            ["taskkill", "/F", "/T", "/PID", str(pid)],
+            capture_output=True, timeout=10,
+        )
+    except Exception:
+        pass
+
+
+def _find_orphan_scans():
+    """Find matthunder.py / nuclei.exe / katana.exe processes with no live
+    parent bot (i.e. their parent cmd/python chain doesn't include our PID).
+
+    Returns a list of dicts: {pid, name, cmd_short}.
+    """
+    suspects = []
+    try:
+        procs = subprocess.run(
+            ["wmic", "process", "where",
+             "(name='python.exe' and commandline like '%matthunder%') or "
+             "name='nuclei.exe' or "
+             "(name='python.exe' and commandline like '%katana%') or "
+             "(name='python.exe' and commandline like '%httpx%') or "
+             "(name='python.exe' and commandline like '%subfinder%')",
+             "get", "ProcessId,Name,CommandLine", "/format:list"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if procs.returncode != 0:
+            return suspects
+        cur = {}
+        for line in procs.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                if cur.get("ProcessId"):
+                    pid = int(cur["ProcessId"])
+                    name = cur.get("Name", "?")
+                    cmd = (cur.get("CommandLine") or "").strip()
+                    cmd_short = (cmd[:90] + "…") if len(cmd) > 90 else cmd
+                    # Skip our own bot process (telegram_deep_bot.py)
+                    if "telegram_deep_bot" in cmd:
+                        cur = {}
+                        continue
+                    suspects.append({"pid": pid, "name": name, "cmd_short": cmd_short})
+                cur = {}
+                continue
+            if "=" in line:
+                k, v = line.split("=", 1)
+                cur[k.strip()] = v.strip()
+        if cur.get("ProcessId"):
+            pid = int(cur["ProcessId"])
+            name = cur.get("Name", "?")
+            cmd = (cur.get("CommandLine") or "").strip()
+            cmd_short = (cmd[:90] + "…") if len(cmd) > 90 else cmd
+            if "telegram_deep_bot" not in cmd:
+                suspects.append({"pid": pid, "name": name, "cmd_short": cmd_short})
+    except Exception as e:
+        logger.debug("find_orphan_scans failed: %s", e)
+    return suspects
+
+
+def _load_scan_state():
+    """Re-hydrate active_scan from disk after bot restart.
+
+    If a previous process is still alive, we leave active_scan cleared
+    (the prior scan completed / orphaned). We DO report the orphan
+    findings so the user knows what happened.
+    """
+    if not SCAN_STATE_PATH.exists():
+        return
+    try:
+        import json as _json
+        data = _json.loads(SCAN_STATE_PATH.read_text(encoding="utf-8", errors="ignore") or "{}")
+    except Exception as e:
+        logger.warning("load_scan_state: failed to parse %s: %s", SCAN_STATE_PATH, e)
+        _clear_scan_state()
+        return
+
+    target = data.get("target")
+    pid = data.get("process_pid")
+    started_at = data.get("started_at")
+    log_path = data.get("log_path")
+
+    # If the prior scan's process is still alive, it's an orphan — kill it
+    # so the user can start a fresh scan. We don't try to re-attach to a
+    # running matthunder.py because we've lost its pipes & watch task.
+    if pid and _pid_alive(pid):
+        logger.warning("Orphan matthunder PID %s detected; killing tree", pid)
+        _kill_pid_tree(pid)
+        orphan_msg = (
+            f"⚠️ Scan sebelumnya (`{target}`) di-detect sebagai orphan "
+            f"(PID {pid} masih jalan padahal bot restart). Sudah di-kill. "
+            f"Silakan mulai scan ulang."
+        )
+        try:
+            # Best-effort: notify the owner asynchronously after the loop starts.
+            import asyncio
+            loop = asyncio.get_event_loop()
+            loop.create_task(_notify_orphan(orphan_msg, data))
+        except Exception:
+            pass
+    else:
+        logger.info("Previous scan state for %s loaded (process gone)", target)
+
+    _clear_scan_state()
+
+
+async def _notify_orphan(text: str, data: dict):
+    """Send a Telegram message to the owner about the orphaned scan."""
+    try:
+        chat_id = OWNER_ID
+        if chat_id:
+            await app.bot.send_message(chat_id=chat_id, text=text)
+        # Also try to edit the prior status message so the user sees the
+        # situation when they tap "📊 Status".
+        msg_id = data.get("message_id")
+        if chat_id and msg_id:
+            try:
+                await app.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=msg_id,
+                    text=text + "\n\n_Bot restart di tengah scan — status di-reset._",
+                )
+            except TelegramError:
+                pass
+    except Exception as e:
+        logger.debug("notify_orphan failed: %s", e)
+
+
+async def _heartbeat_loop(interval_s: int = 10):
+    """Refresh heartbeat while bot is alive. Stops on CancelledError."""
+    try:
+        while True:
+            _write_heartbeat()
+            await asyncio.sleep(interval_s)
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        return
+
+
+def _kill_proc_tree(proc, grace_s: float = 3.0):
+    """Terminate proc and any subprocess children (e.g. nuclei.exe).
+
+    On Windows, asyncio.create_subprocess_exec spawns a child process group;
+    we walk the PID tree and terminate each one to avoid zombie nuclei.
+    """
+    if proc is None:
+        return
+    if proc.returncode is not None:
+        return
+    pid = getattr(proc, "pid", None)
+    try:
+        if pid:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True, timeout=10,
+            )
+        else:
+            proc.terminate()
+    except Exception:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    try:
+        proc.wait(timeout=grace_s)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
 async def watch_scan(chat_id: int, proc, target: str, log_file):
+    _write_heartbeat()
     try:
         code = await proc.wait()
     finally:
@@ -2557,10 +2836,14 @@ async def watch_scan(chat_id: int, proc, target: str, log_file):
             log_file.close()
         except Exception:
             pass
+        # Remove heartbeat so run_bot knows bot is still alive
+        # (it will keep being refreshed by other watch_scan / heartbeat tasks)
+    _write_heartbeat()
 
     duration = int(time.time() - (active_scan.get("started_at") or time.time()))
     zip_path = make_report_zip(target)
-    active_scan.update({"process": None, "target": None, "started_at": None, "step": "Idle", "step_detail": "Belum ada scan berjalan.", "progress_pct": 0})
+    active_scan.update({"process": None, "target": None, "started_at": None, "step": "Idle", "step_detail": "Belum ada scan berjalan.", "progress_pct": 0, "step_started_at": None})
+    _clear_scan_state()
 
     bot = app.bot if 'app' in globals() else None
     if not bot:
@@ -2583,6 +2866,21 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update):
         return await deny(update)
     if not scan_running():
+        # Also check for orphan matthunder processes that survived a bot crash
+        orphans = _find_orphan_scans()
+        if orphans:
+            lines = ["✅ Tidak ada scan berjalan (bot state).", "",
+                     "⚠️ Tapi ada process matthunder/nuclei yang masih jalan:"]
+            for o in orphans:
+                lines.append(f"  • PID {o['pid']} ({o['name']}) — {o.get('cmd_short','')}")
+            lines.append("")
+            lines.append("Klik tombol di bawah untuk bersihkan.")
+            return await update.message.reply_text(
+                "\n".join(lines),
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🧹 Kill Orphan", callback_data="menu_orphan_kill"),
+                ]])
+            )
         return await update.message.reply_text("✅ Tidak ada scan berjalan.")
     await update.message.reply_text(build_status_text(), reply_markup=status_keyboard())
 
@@ -2594,10 +2892,10 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not scan_running():
         return await update.message.reply_text("✅ Tidak ada scan berjalan.")
     try:
-        p.terminate()
-        await asyncio.sleep(3)
-        if p.returncode is None:
-            p.kill()
+        await update.message.reply_text("⛔ Menghentikan scan + child process (nuclei dll)…")
+        _kill_proc_tree(p, grace_s=4.0)
+        active_scan.update({"process": None, "target": None, "started_at": None, "step": "Idle", "step_detail": "Belum ada scan berjalan.", "progress_pct": 0, "step_started_at": None})
+        _clear_scan_state()
         await update.message.reply_text("⛔ Scan dihentikan.")
     except Exception as e:
         await update.message.reply_text(f"❌ Gagal stop scan: {e}")
@@ -3537,6 +3835,13 @@ def main():
         user_config.apply_env()
     except Exception as e:
         logger.warning("user_config load failed: %s", e)
+    # Recover from a previous bot restart: clear orphan matthunder/nuclei
+    # processes and notify the user. active_scan is in-memory only — we don't
+    # re-attach to a running scan because we've lost its pipes + watch task.
+    try:
+        _load_scan_state()
+    except Exception as e:
+        logger.debug("load_scan_state on startup failed: %s", e)
     # Disable JobQueue/APScheduler because this bot does not use scheduled jobs.
     # This avoids APScheduler timezone errors on some Windows/Python environments.
     app = (

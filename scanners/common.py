@@ -24,6 +24,37 @@ MAX_PAGES_PER_SCAN = 50
 MAX_LINKS_PER_PAGE = 200
 
 
+class RateLimiter:
+    """Per-host rate limiter with exponential backoff."""
+    def __init__(self, base_delay: float = 0.5, max_delay: float = 30.0, max_retries: int = 3):
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.max_retries = max_retries
+        self._host_last_hit: dict[str, float] = {}
+        self._host_failures: dict[str, int] = {}
+
+    def wait(self, host: str) -> None:
+        import time
+        now = time.time()
+        last = self._host_last_hit.get(host, 0)
+        failures = self._host_failures.get(host, 0)
+        delay = min(self.base_delay * (2 ** failures), self.max_delay)
+        elapsed = now - last
+        if elapsed < delay:
+            time.sleep(delay - elapsed)
+        self._host_last_hit[host] = time.time()
+
+    def record_failure(self, host: str) -> None:
+        self._host_failures[host] = self._host_failures.get(host, 0) + 1
+
+    def record_success(self, host: str) -> None:
+        self._host_failures[host] = 0
+
+
+# Global rate limiter instance
+rate_limiter = RateLimiter()
+
+
 def resolve_tool(name):
     """Find a tool binary — prioritize Go bin over Python pip scripts.
 
@@ -69,7 +100,7 @@ def host_in_scope(host: str, root_domain: str) -> bool:
     return h == rd or h.endswith("." + rd)
 
 
-def canonical_url(url: str) -> str:
+def canonical_url(url: str, include_query: bool = True) -> str:
     try:
         p = urlparse(url)
         if p.scheme not in SCHEMES_ALLOWED or not p.netloc:
@@ -79,6 +110,8 @@ def canonical_url(url: str) -> str:
         if host.startswith("www."):
             host = host[4:]
         path = p.path or "/"
+        if include_query and p.query:
+            return f"{scheme}://{host}{path}?{p.query}"
         return f"{scheme}://{host}{path}"
     except Exception:
         return ""
@@ -184,15 +217,23 @@ def log(con: sqlite3.Connection, scan_id: str, message: str) -> None:
     con.commit()
 
 
-def fetch(url: str, client: httpx.Client) -> tuple[Optional[str], Optional[int], Optional[str]]:
-    """Return (final_url, status_code, error)."""
-    try:
-        r = client.get(url, timeout=DEFAULT_TIMEOUT, follow_redirects=True)
-        return (str(r.url), r.status_code, None)
-    except httpx.TimeoutException:
-        return (None, None, "timeout")
-    except Exception as e:
-        return (None, None, type(e).__name__)
+def fetch(url: str, client: httpx.Client, retries: int = 2) -> tuple[Optional[str], Optional[int], Optional[str]]:
+    """Return (final_url, status_code, error). Uses rate limiter with retry."""
+    host = urlparse(url).netloc
+    last_err = None
+    for attempt in range(retries + 1):
+        rate_limiter.wait(host)
+        try:
+            r = client.get(url, timeout=DEFAULT_TIMEOUT, follow_redirects=True)
+            rate_limiter.record_success(host)
+            return (str(r.url), r.status_code, None)
+        except httpx.TimeoutException:
+            rate_limiter.record_failure(host)
+            last_err = "timeout"
+        except Exception as e:
+            rate_limiter.record_failure(host)
+            last_err = type(e).__name__
+    return (None, None, last_err)
 
 
 def crawl_domain(domain: str, max_pages: int = MAX_PAGES_PER_SCAN) -> list[tuple[str, str]]:
@@ -217,20 +258,22 @@ def crawl_domain(domain: str, max_pages: int = MAX_PAGES_PER_SCAN) -> list[tuple
                 if not host_in_scope(urlparse(cu).netloc, domain):
                     continue
                 seen.add(cu)
-                final, code, err = fetch(cu, client)
-                if err or code is None or code >= 400:
-                    continue
-                if not final or not host_in_scope(urlparse(final).netloc, domain):
-                    continue
+                host = urlparse(cu).netloc
+                rate_limiter.wait(host)
                 try:
-                    r = client.get(final, timeout=DEFAULT_TIMEOUT)
+                    r = client.get(cu, timeout=DEFAULT_TIMEOUT, follow_redirects=True)
+                    rate_limiter.record_success(host)
                     if r.status_code >= 400:
+                        continue
+                    final_url = str(r.url)
+                    if not host_in_scope(urlparse(final_url).netloc, domain):
                         continue
                     ct = r.headers.get("content-type", "")
                     if "html" not in ct.lower():
                         continue
                     html = r.text[:200000]
                 except Exception:
+                    rate_limiter.record_failure(host)
                     continue
                 pages.append((final, html))
                 anchors = extract_anchors(html, final)
@@ -291,6 +334,41 @@ def is_dynamic_param(url: str, param: str, client: httpx.Client) -> bool:
     except Exception:
         pass
     return False
+
+
+def is_spa_catchall(domain: str, client: httpx.Client) -> bool:
+    """Detect if a domain is a SPA that returns 200 for every path.
+
+    Tests with random/nonexistent paths and compares response bodies.
+    If all responses are identical (same size, same content), it's a SPA catch-all.
+    """
+    import hashlib
+    test_paths = [
+        "/nonexistent_test_path_xyz123",
+        "/asdfghjkl_random_456",
+        "/totally_fake_page_789",
+        "/.well-known/fake_probe",
+    ]
+    bodies = []
+    for path in test_paths:
+        url = f"https://{domain}{path}"
+        try:
+            r = client.get(url, timeout=DEFAULT_TIMEOUT, follow_redirects=True)
+            if r.status_code == 200:
+                bodies.append(r.text[:2000])
+        except Exception:
+            continue
+
+    if len(bodies) < 3:
+        return False
+
+    # Hash each body and compare
+    hashes = [hashlib.md5(b.encode("utf-8", errors="ignore")).hexdigest() for b in bodies]
+    # If 3+ out of 4 have same hash, it's a catch-all
+    from collections import Counter
+    counts = Counter(hashes)
+    most_common_count = counts.most_common(1)[0][1]
+    return most_common_count >= 3
 
 
 # ─── Fallback endpoint discovery ─────────────────────────────────────────────

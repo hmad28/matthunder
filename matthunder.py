@@ -327,6 +327,7 @@ def _run_post_nuclei_dast(target: str, param_output: str, active_file: str, scan
     t = threading.Thread(target=_run_dast, daemon=True)
     t.start()
     print(f"  ↳ Dalfox + Sqlmap jalan di background. Log: `bot_logs/dast_{target}.log`")
+    return t
 
 
 os.makedirs(OUTPUT_FOLDER_SENSITIVE_DATA, exist_ok=True)
@@ -562,16 +563,123 @@ def setup_menu():
             print("[❌] Invalid choice.")
 
 def run_with_animation(message, func, *args, **kwargs):
+    """Run a subprocess-returning function while streaming its stdout to the console.
+
+    A background thread drains stdout into a queue so the main loop can poll
+    without blocking on readline(). This avoids the nuclei-on-big-input case
+    where the child buffers its output for minutes and the old
+    ``iter(result.stdout.readline, '')`` hung forever. A hard timeout (env:
+    ``MATTHUNDER_STEP_TIMEOUT_SEC``, default 0 = unlimited) kills the process
+    tree if a step runs too long.
+    """
+    import os
+    import queue
+    import threading
+    import time
+
     console.print(f"[bright_blue][+] {message}...[/bright_blue]")
     result = func(*args, **kwargs)
-    if isinstance(result, subprocess.Popen):
+    if not isinstance(result, subprocess.Popen):
+        console.print(f"[green][✓] {message} completed.[/green]")
+        return
+
+    timeout_sec = 0
+    try:
+        timeout_sec = int(os.getenv("MATTHUNDER_STEP_TIMEOUT_SEC", "0") or "0")
+    except Exception:
+        timeout_sec = 0
+    step_started = time.time()
+    last_heartbeat = step_started
+
+    line_queue: "queue.Queue[str]" = queue.Queue()
+    eof_sentinel = object()
+
+    def _drain_stdout():
+        try:
+            # When Popen is created with encoding="utf-8" stdout is a text stream
+            # and readline() returns str. When it's a binary stream it returns bytes.
+            for raw in iter(result.stdout.readline, ""):
+                if isinstance(raw, bytes):
+                    try:
+                        text = raw.decode("utf-8", errors="replace")
+                    except Exception:
+                        text = raw.decode("latin-1", errors="replace")
+                    line_queue.put(text.rstrip("\r\n"))
+                else:
+                    line_queue.put((raw or "").rstrip("\r\n"))
+        except Exception:
+            pass
+        finally:
+            line_queue.put(eof_sentinel)
+
+    reader = threading.Thread(target=_drain_stdout, daemon=True)
+    reader.start()
+
+    try:
         with Status(f"[bold bright_blue]Running {message}[/bold bright_blue]", console=console) as status:
-            for line in iter(result.stdout.readline, ''):
-                if line:
-                    console.print(line.rstrip(), highlight=False)
-            result.wait()
-    else:
-        pass
+            while True:
+                # Drain whatever is buffered right now (non-blocking)
+                drained_any = False
+                while True:
+                    try:
+                        item = line_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    if item is eof_sentinel:
+                        # End of stream; process likely done. Loop will exit via poll() check.
+                        continue
+                    drained_any = True
+                    if item:
+                        console.print(item, highlight=False)
+                # If process is done and no more data, exit
+                if result.poll() is not None:
+                    if line_queue.empty():
+                        break
+                    if not drained_any:
+                        # process exited but reader hasn't signalled yet; small wait
+                        try:
+                            item = line_queue.get(timeout=0.5)
+                            if item is eof_sentinel:
+                                break
+                            if item:
+                                console.print(item, highlight=False)
+                        except queue.Empty:
+                            break
+                # Heartbeat in console every 60s
+                now = time.time()
+                if now - last_heartbeat >= 60:
+                    elapsed = int(now - step_started)
+                    print(f"[⏱️] Still running {message} ({elapsed}s elapsed)…", flush=True)
+                    last_heartbeat = now
+                # Hard timeout
+                if timeout_sec and (now - step_started) >= timeout_sec:
+                    print(f"[!] Timeout {timeout_sec}s reached for {message}. Killing process tree.", flush=True)
+                    try:
+                        subprocess.run(
+                            ["taskkill", "/F", "/T", "/PID", str(result.pid)],
+                            capture_output=True, timeout=10,
+                        )
+                    except Exception:
+                        try:
+                            result.kill()
+                        except Exception:
+                            pass
+                    break
+                time.sleep(0.2)
+            # Final wait
+            try:
+                result.wait(timeout=15)
+            except Exception:
+                try:
+                    result.kill()
+                except Exception:
+                    pass
+    finally:
+        try:
+            if result.poll() is None:
+                result.kill()
+        except Exception:
+            pass
     console.print(f"[green][✓] {message} completed.[/green]")
 def get_target_input():
     """Ask for target URL input directly from user."""
@@ -2084,9 +2192,14 @@ def dark_deep_target(mode, target, resume=False):
                     nuclei_js_exposure(target, js_output, nuclei_output_js, user_agent, scan_args)
                     nuclei_param_dast(target, param_output, nuclei_output_param, user_agent, scan_args)
                     # Post-nuclei DAST runs in BACKGROUND (parallel with takeover)
+                    dast_thread = None
                     if os.getenv("MATTHUNDER_SKIP_DAST") != "1":
-                        _run_post_nuclei_dast(target, param_output, active_file, scan_args)
+                        dast_thread = _run_post_nuclei_dast(target, param_output, active_file, scan_args)
                     nuclei_takeover(subdomain_file, output_path_takeover, target)
+                    # Wait for DAST to finish before exiting
+                    if dast_thread and dast_thread.is_alive():
+                        print("[...] Waiting for Dalfox + Sqlmap to finish...")
+                        dast_thread.join(timeout=600)  # Max 10 min wait
                 else:
                     print("[!] Quick mode: skipping JS / DAST / takeover scans (CVE + default-login only)")
             else:
@@ -2100,6 +2213,36 @@ def dark_deep_target(mode, target, resume=False):
 
         print(f"[✓] All processes completed for target: {target}")
         print_results_summary(target)
+
+DEFAULT_STEP_TIMEOUTS = {
+    # Per-step soft timeouts (seconds). Override per-step with env var like
+    # MATTHUNDER_TIMEOUT_NUCLEI_JS=3600. Set 0 to disable.
+    "nuclei_basic": 1800,        # 30 min
+    "nuclei_js":   3600,        # 60 min (huge JS file lists)
+    "nuclei_dast": 3600,        # 60 min
+    "nuclei_takeover": 1200,    # 20 min
+    "subfinder":   300,
+    "httpx":       600,
+    "katana":      1200,
+    "wayback":     600,
+    "gau":         600,
+}
+
+
+def _set_step_timeout(step_name: str):
+    """Set MATTHUNDER_STEP_TIMEOUT_SEC for the next run_with_animation call.
+
+    Honors per-step env var override (MATTHUNDER_TIMEOUT_<STEP>). If neither
+    env var is set, uses DEFAULT_STEP_TIMEOUTS[<step>] (or 0 if unknown).
+    Pass 0 to disable timeout for that step.
+    """
+    explicit = os.getenv(f"MATTHUNDER_TIMEOUT_{step_name.upper()}")
+    if explicit is not None and explicit != "":
+        os.environ["MATTHUNDER_STEP_TIMEOUT_SEC"] = explicit
+        return
+    default = DEFAULT_STEP_TIMEOUTS.get(step_name, 0)
+    os.environ["MATTHUNDER_STEP_TIMEOUT_SEC"] = str(default)
+
 
 def dark_deep(mode):
         target = get_target_input()
@@ -2141,12 +2284,20 @@ def dark_deep(mode):
             nuclei_param_dast(target, param_output, nuclei_output_param, user_agent, scan_args)
         elif mode == "deep":
             nuclei_without_parameter(target, active_file, nuclei_output_httpx, user_agent, scan_args)
+            _set_step_timeout("nuclei_js")
             nuclei_js_exposure(target, js_output, nuclei_output_js, user_agent, scan_args)
+            _set_step_timeout("nuclei_dast")
             nuclei_param_dast(target, param_output, nuclei_output_param, user_agent, scan_args)
             # Post-nuclei DAST in background, parallel with takeover
+            dast_thread = None
             if os.getenv("MATTHUNDER_SKIP_DAST") != "1":
-                _run_post_nuclei_dast(target, param_output, active_file, scan_args)
+                dast_thread = _run_post_nuclei_dast(target, param_output, active_file, scan_args)
+            _set_step_timeout("nuclei_takeover")
             nuclei_takeover(subdomain_file, output_path_takeover, target)
+            # Wait for DAST to finish before exiting
+            if dast_thread and dast_thread.is_alive():
+                print("[...] Waiting for Dalfox + Sqlmap to finish...")
+                dast_thread.join(timeout=600)  # Max 10 min wait
         else:
             print(f"[!] Unknown scan mode: {mode}")
             return

@@ -16,13 +16,25 @@ from .common import (
     open_db, utc_now_iso, extract_anchors,
 )
 
+import re
+
+# Extract embedded resources: iframes, script src, link href
+EMBED_RE = re.compile(
+    r'(?:src|href)=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+TAG_TYPES_RE = re.compile(
+    r'<(?:iframe|script|link|object|embed)\s+[^>]*?(?:src|href)=["\']([^"\']+)["\'][^>]*>',
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 BAC_SERVICES = {
     "google_drive": ["drive.google.com"],
     "google_docs":  ["docs.google.com"],
     "sharepoint":   ["sharepoint.com"],
-    "onedrive":     ["onedrive.com", "1drv.ms"],
-    "dropbox":      ["dropbox.com", "dropboxs.com"],
+    "onedrive":     ["onedrive.live.com", "1drv.ms"],
+    "dropbox":      ["dropbox.com", "db.tt"],
     "github":       ["github.com"],
     "notion":       ["notion.so", "notion.site"],
     "trello":       ["trello.com"],
@@ -30,13 +42,14 @@ BAC_SERVICES = {
     "atlassian":    ["atlassian.net"],
 }
 
+# Only exclude known non-content pages; keep /file/ and /folders/ as they ARE the shared resources
 EXCLUDE_PATH_HINTS = {
-    "drive.google.com": ["/file/", "/folders/", "/u/"],
-    "github.com":       ["/login", "/signup", "/settings", "/marketplace"],
+    "drive.google.com": ["/u/0/landing"],  # landing/home pages only
+    "github.com":       ["/login", "/signup", "/settings", "/marketplace", "/features"],
     "notion.so":        ["/login", "/signup"],
     "trello.com":       ["/login", "/signup"],
-    "figma.com":        ["/login", "/signup", "/community"],
-    "dropbox.com":      ["/login", "/signup", "/business"],
+    "figma.com":        ["/login", "/signup", "/community", "/enterprise"],
+    "dropbox.com":      ["/login", "/signup", "/business", "/plans"],
 }
 
 
@@ -83,16 +96,41 @@ def run(domain: str, services: list[str], max_pages: int = 30) -> dict:
     log(con, scan_id, f"Crawled {len(pages)} pages")
 
     found: list[dict] = []
+    seen = set()
     for page_url, html in pages:
+        # Phase 1: Anchor tags (original)
         for a in extract_anchors(html, page_url):
             svc = is_target_link(a["canonical"])
             if not svc or svc not in services:
                 continue
+            if a["canonical"] in seen:
+                continue
+            seen.add(a["canonical"])
             found.append({
                 "service": svc,
                 "target_url": a["canonical"],
                 "source_url": page_url,
                 "anchor": a["anchor"],
+                "source_type": "anchor",
+            })
+        # Phase 2: Embedded resources (iframe, script, link, object)
+        for m in TAG_TYPES_RE.finditer(html or ""):
+            url_str = m.group(1)
+            from urllib.parse import urljoin
+            abs_url = urljoin(page_url, url_str)
+            cu = canonical_url(abs_url)
+            if not cu or cu in seen:
+                continue
+            svc = is_target_link(cu)
+            if not svc or svc not in services:
+                continue
+            seen.add(cu)
+            found.append({
+                "service": svc,
+                "target_url": cu,
+                "source_url": page_url,
+                "anchor": url_str,
+                "source_type": "embed",
             })
 
     seen = set()

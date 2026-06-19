@@ -42,21 +42,21 @@ PROBES = {
 }
 
 EXPECTED = {
-    "jinja2":     "49",
-    "twig":       "49",
-    "freemarker": "49",
-    "erb":        "49",
-    "smarty":     "49",
-    "thymeleaf":  "49",
-    "velocity":   "49",
-    "mako":       "49",
+    "jinja2":     ["49"],
+    "twig":       ["49"],
+    "freemarker": ["49"],
+    "erb":        ["49"],
+    "smarty":     ["49", "SSTI_MARKER_SMARTY"],
+    "thymeleaf":  ["49"],
+    "velocity":   ["49", "VELOCITY_TRUE"],
+    "mako":       ["49"],
 }
 
 URL_PARAM_HINT = re.compile(r"(\?|q=|s=|search=|q=|input=|data=|view=|id=|template=|name=|file=|page=|redirect=)", re.I)
 
 
 def _get_param_urls(html: str, page_url: str) -> list[tuple[str, str]]:
-    """Return list of (full_url, param_name) heuristic for SSTI testing."""
+    """Return list of (full_url_with_query, param_name) heuristic for SSTI testing."""
     out: list[tuple[str, str]] = []
     parsed = urlparse(page_url)
     base_qs = parsed.query
@@ -74,15 +74,16 @@ def _get_param_urls(html: str, page_url: str) -> list[tuple[str, str]]:
         if not host_in_scope(cu_host, parsed.netloc.split(":")[0]):
             continue
         if "?" in target:
+            full_url = target  # Keep full URL with query string
             for pair in target.split("?", 1)[1].split("&"):
                 if "=" in pair:
                     param = pair.split("=", 1)[0]
-                    if param and (target.split("?", 1)[0] + "?" + param, param) not in out:
-                        out.append((target.split("?", 1)[0], param))
+                    if param and (full_url, param) not in out:
+                        out.append((full_url, param))
     return out
 
 
-def _probe(url: str, param: str, payload: str, expected: str, client: httpx.Client) -> tuple[bool, str, int]:
+def _probe(url: str, param: str, payload: str, expected: list[str], baseline_body: str, client: httpx.Client) -> tuple[bool, str, int]:
     sep = "&" if "?" in url else "?"
     test_url = f"{url}{sep}{param}={quote(payload, safe='')}"
     try:
@@ -90,8 +91,10 @@ def _probe(url: str, param: str, payload: str, expected: str, client: httpx.Clie
     except Exception:
         return (False, "", 0)
     body = r.text or ""
-    if expected and expected in body and payload not in body:
-        return (True, body[:1000], r.status_code)
+    # Check if any expected marker appears in response but NOT in baseline
+    for exp in expected:
+        if exp and exp in body and exp not in baseline_body and payload not in body:
+            return (True, body[:1000], r.status_code)
     return (False, body[:500], r.status_code)
 
 
@@ -123,10 +126,17 @@ def run(domain: str, engines: list[str] = None, max_pages: int = 20) -> dict:
     tested = 0
     with httpx.Client(headers={"User-Agent": USER_AGENT}, timeout=DEFAULT_TIMEOUT, follow_redirects=True) as client:
         for url, param in targets[:50]:
+            # Capture baseline response (no injection) for comparison
+            baseline_body = ""
+            try:
+                r_base = client.get(url, timeout=DEFAULT_TIMEOUT, follow_redirects=True)
+                baseline_body = r_base.text or ""
+            except Exception:
+                pass
             for engine in engines:
-                for payload in PROBES.get(engine, [])[:1]:
-                    expected = EXPECTED.get(engine, "")
-                    ok, body, code = _probe(url, param, payload, expected, client)
+                for payload in PROBES.get(engine, []):
+                    expected = EXPECTED.get(engine, ["49"])
+                    ok, body, code = _probe(url, param, payload, expected, baseline_body, client)
                     tested += 1
                     if ok:
                         found.append({
@@ -136,7 +146,7 @@ def run(domain: str, engines: list[str] = None, max_pages: int = 20) -> dict:
                             "param": param,
                             "status": code,
                         })
-                        break
+                        break  # One engine match is enough per URL/param
 
     seen = set()
     unique = []

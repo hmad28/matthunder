@@ -66,12 +66,19 @@ def run_apirecon(domain: str, wordlist: Optional[str] = None) -> dict:
 
     base = f"https://{domain}"
     if not wordlist:
-        wordlist = os.path.join(os.path.expanduser("~"), "go", "pkg", "mod", "github.com", "assetnote", "kiterunner", "kb", "http", "http-megapich.json")
-        if not os.path.exists(wordlist):
-            wordlist = ""
-    cmd = [kr, "scan", base, "-A", "apiroutes-210128:20000", "--fail-status-codes", "404,406"]
+        # Try common kiterunner wordlist paths
+        kr_mod = os.path.join(os.path.expanduser("~"), "go", "pkg", "mod", "github.com", "assetnote", "kiterunner")
+        candidates = []
+        if os.path.isdir(kr_mod):
+            for root, _, files in os.walk(kr_mod):
+                for f in files:
+                    if f.endswith(".json") and "mega" in f.lower():
+                        candidates.append(os.path.join(root, f))
+        wordlist = candidates[0] if candidates else ""
+    # kiterunner needs -o json for JSONL output; filter noise status codes
+    cmd = [kr, "scan", base, "-o", "json", "--fail-status-codes", "404,406,410"]
     if wordlist and os.path.exists(wordlist):
-        cmd = [kr, "scan", base, "-w", wordlist]
+        cmd = [kr, "scan", base, "-w", wordlist, "-o", "json", "--fail-status-codes", "404,406,410"]
     log(con, scan_id, f"Running: {' '.join(cmd[:6])}...")
     code, stdout, stderr = _run(cmd, timeout=600)
     log(con, scan_id, f"kiterunner exit {code}")
@@ -89,7 +96,11 @@ def run_apirecon(domain: str, wordlist: Optional[str] = None) -> dict:
         cu = canonical_url(j.get("url") or j.get("endpoint", ""))
         if not cu or not host_in_scope(urlparse(cu).netloc, domain):
             continue
-        found.append({"url": cu, "status": j.get("status_code", ""), "method": j.get("method", "GET")})
+        # Skip 401/403/500 noise — only keep endpoints that actually respond
+        status = j.get("status_code", 0)
+        if isinstance(status, int) and status in (401, 403, 500, 502, 503):
+            continue
+        found.append({"url": cu, "status": str(status) if status else "discovered", "method": j.get("method", "GET")})
 
     seen = set()
     unique = []
@@ -135,24 +146,36 @@ def run_params(domain: str, methods: Optional[list[str]] = None) -> dict:
     methods = methods or ["GET", "POST"]
     found_params: list[dict] = []
     tested = 0
-    with httpx.Client(headers={"User-Agent": USER_AGENT}, timeout=15.0, follow_redirects=True) as client:
-        for page_url, html in pages[:5]:
-            for method in methods:
-                cmd = [arjun, "-u", page_url, "--method", method, "--stable", "-oJ", "-"]
+    import tempfile
+    for page_url, html in pages[:5]:
+        for method in methods:
+            # arjun -oJ writes to a file, not stdout — use temp file
+            tmpf = tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w")
+            tmpf.close()
+            try:
+                cmd = [arjun, "-u", page_url, "--method", method, "--stable", "-oJ", tmpf.name]
                 code, stdout, stderr = _run(cmd, timeout=120)
-                if code != 0 or not stdout.strip():
+                if code != 0:
                     continue
                 tested += 1
-                try:
-                    j = json.loads(stdout)
-                except Exception:
+                with open(tmpf.name, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
+                if not content.strip():
                     continue
+                j = json.loads(content)
                 for param in j.get("params", []):
                     found_params.append({
                         "param": param,
                         "url": page_url,
                         "method": method,
                     })
+            except Exception:
+                continue
+            finally:
+                try:
+                    os.unlink(tmpf.name)
+                except OSError:
+                    pass
 
     seen = set()
     unique = []

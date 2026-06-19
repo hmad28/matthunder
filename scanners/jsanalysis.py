@@ -43,6 +43,18 @@ SECRET_PATTERNS = [
     ("password", re.compile(r"(?i)(password|passwd|pwd)\s*[=:]\s*['\"]?([^\s'\"]{6,})")),
 ]
 
+# Known placeholder/template values — ignore these
+PLACEHOLDER_VALUES = {
+    "replace_me", "replaceme", "your_api_key", "your-api-key", "your_token",
+    "example", "example_key", "test", "test_key", "changeme", "change_me",
+    "todo", "fixme", "xxx", "null", "undefined", "none", "empty",
+    "insert_key_here", "your_secret_here", "your_password_here",
+    "password_placeholder", "secret_placeholder", "api_key_placeholder",
+}
+
+# Max file size to analyze (2MB) — skip huge bundles
+MAX_JS_SIZE = 2 * 1024 * 1024
+
 # Endpoint patterns
 ENDPOINT_PATTERNS = [
     re.compile(r'["\'](/api/[^"\']+)["\']'),
@@ -69,14 +81,29 @@ def _shannon_entropy(s: str) -> float:
 
 
 def _extract_js_files(html: str, base_url: str) -> list[str]:
-    """Extract JS file URLs from HTML."""
+    """Extract JS file URLs from HTML, including sourcemap references."""
     js_urls = set()
     for m in re.finditer(r'<script[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE):
         src = m.group(1)
         absolute = urljoin(base_url, src)
         if absolute.endswith(".js") or "javascript" in absolute.lower():
             js_urls.add(absolute)
+    # Also check for sourcemap references inside script tags
+    for m in re.finditer(r'//#\s*sourceMappingURL=(.+)', html):
+        map_url = m.group(1).strip()
+        absolute = urljoin(base_url, map_url)
+        js_urls.add(absolute)
     return list(js_urls)
+
+
+def _extract_inline_scripts(html: str, base_url: str) -> list[str]:
+    """Extract inline script blocks from HTML for analysis."""
+    scripts = []
+    for m in re.finditer(r'<script[^>]*>(.*?)</script>', html, re.IGNORECASE | re.DOTALL):
+        content = m.group(1).strip()
+        if content and len(content) > 50:  # Skip tiny inline scripts
+            scripts.append(content)
+    return scripts
 
 
 def _analyze_js(js_url: str, client: httpx.Client, domain: str) -> dict:
@@ -87,15 +114,39 @@ def _analyze_js(js_url: str, client: httpx.Client, domain: str) -> dict:
         r = client.get(js_url, timeout=DEFAULT_TIMEOUT, follow_redirects=True)
         if r.status_code != 200:
             return result
+        # Skip huge files
+        if len(r.content) > MAX_JS_SIZE:
+            return result
         content = r.text
     except Exception:
         return result
 
-    # Find secrets
+    return _analyze_content(content, js_url, domain, result)
+
+
+def _analyze_inline(script_content: str, source_url: str, domain: str) -> dict:
+    """Analyze inline script content for secrets and endpoints."""
+    result = {"url": source_url, "secrets": [], "endpoints": [], "high_entropy_strings": []}
+    return _analyze_content(script_content, source_url, domain, result)
+
+
+def _analyze_content(content: str, source_url: str, domain: str, result: dict) -> dict:
+    """Analyze text content for secrets and endpoints."""
+    # Find secrets — filter placeholders and duplicates
+    seen_secrets = set()
     for name, pattern in SECRET_PATTERNS:
         for m in pattern.finditer(content):
             match = m.group(0)
-            if len(match) > 8:  # Skip very short matches
+            if len(match) > 8:
+                # Skip known placeholders
+                match_lower = match.lower().strip()
+                if any(p in match_lower for p in PLACEHOLDER_VALUES):
+                    continue
+                # Dedup
+                secret_key = (name, match[:60])
+                if secret_key in seen_secrets:
+                    continue
+                seen_secrets.add(secret_key)
                 result["secrets"].append({"type": name, "value": match[:80]})
 
     # Find endpoints
@@ -106,11 +157,12 @@ def _analyze_js(js_url: str, client: httpx.Client, domain: str) -> dict:
                 if endpoint not in result["endpoints"]:
                     result["endpoints"].append(endpoint)
 
-    # Find high-entropy strings (potential secrets)
+    # Find high-entropy strings — raise threshold to 5.0 to reduce FP
     for m in re.finditer(r'["\']([A-Za-z0-9+/=_-]{32,})["\']', content):
         s = m.group(1)
-        if _shannon_entropy(s) > 4.5:
-            result["high_entropy_strings"].append(s[:60])
+        if _shannon_entropy(s) > 5.0:
+            if s not in result["high_entropy_strings"]:
+                result["high_entropy_strings"].append(s[:60])
 
     return result
 
@@ -143,17 +195,37 @@ def run(domain: str, max_pages: int = 30) -> dict:
     all_secrets = []
     all_endpoints = []
     all_entropy = []
+    seen_secrets = set()
 
     with httpx.Client(headers={"User-Agent": USER_AGENT}, follow_redirects=True, timeout=DEFAULT_TIMEOUT) as client:
+        # Analyze external JS files
         for js_url in js_urls:
             result = _analyze_js(js_url, client, domain)
             for s in result["secrets"]:
                 s["js_url"] = js_url
-                all_secrets.append(s)
+                key = (s["type"], s["value"][:40])
+                if key not in seen_secrets:
+                    seen_secrets.add(key)
+                    all_secrets.append(s)
             for e in result["endpoints"]:
                 all_endpoints.append({"endpoint": e, "js_url": js_url})
             for h in result["high_entropy_strings"]:
                 all_entropy.append({"value": h, "js_url": js_url})
+
+        # Analyze inline scripts from crawled pages
+        for page_url, html in pages:
+            for script_content in _extract_inline_scripts(html, page_url):
+                result = _analyze_inline(script_content, page_url, domain)
+                for s in result["secrets"]:
+                    s["js_url"] = page_url
+                    key = (s["type"], s["value"][:40])
+                    if key not in seen_secrets:
+                        seen_secrets.add(key)
+                        all_secrets.append(s)
+                for e in result["endpoints"]:
+                    all_endpoints.append({"endpoint": e, "js_url": page_url})
+                for h in result["high_entropy_strings"]:
+                    all_entropy.append({"value": h, "js_url": page_url})
 
     total_findings = len(all_secrets) + len(all_endpoints) + len(all_entropy)
     log(con, scan_id, f"Found {len(all_secrets)} secrets, {len(all_endpoints)} endpoints, {len(all_entropy)} high-entropy strings")
