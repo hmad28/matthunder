@@ -1,11 +1,27 @@
-config.py
+/config.py
 .venv/
+.commandcode/
+__test_routes.py
+_v.py
 __pycache__/
 *.pyc
 *.pyo
 *.log
+**/.env
+**/.env.local
+**/*.db
+**/.pytest_cache/
+**/.pytest-tmp/
+**/__pycache__/
+**/node_modules/
+**/.next/
+**/test-results/
+**/playwright-report/
 bot_logs/
 bot_reports/
+bots/*/config.json
+bots/*/state/
+bots/*/logs/
 subdomain/
 active/
 crawled/
@@ -15,8 +31,8 @@ take_over/
 sensitive_data/
 output/
 results/
-reports/
-reports/*
+/reports/
+/reports/*
 matthunder_scans.db
 test_*.db
 # Per-user runtime config (secrets + per-user target lists)
@@ -24,4 +40,3 @@ targets.json
 user_config.json
 # Banner cache (regenerated)
 matthunder_banner.png
-

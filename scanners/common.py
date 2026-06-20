@@ -275,8 +275,8 @@ def crawl_domain(domain: str, max_pages: int = MAX_PAGES_PER_SCAN) -> list[tuple
                 except Exception:
                     rate_limiter.record_failure(host)
                     continue
-                pages.append((final, html))
-                anchors = extract_anchors(html, final)
+                pages.append((final_url, html))
+                anchors = extract_anchors(html, final_url)
                 for a in anchors:
                     if host_in_scope(urlparse(a["canonical"]).netloc, domain) and a["canonical"] not in seen:
                         queue.append(a["canonical"])
