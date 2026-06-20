@@ -32,6 +32,21 @@ Start-ScheduledTask -TaskName "MatthunderTelegramBot"
 
 ## Commands
 
+### Bot scan commands
+
+Semua command scan di bawah sekarang lewat shared `matthunder_core` service layer:
+
+```text
+/deep example.com standard
+/light example.com fast
+/dark example.com standard
+/blh example.com
+/tpa example.com
+/cred example.com
+/takeover example.com
+/sensitive example.com
+```
+
 | Perintah | Fungsi |
 |----------|--------|
 | `Start-ScheduledTask -TaskName "MatthunderTelegramBot"` | Start bot sekarang |

@@ -18,6 +18,7 @@ Guardrails (defense in depth):
 import re
 import time
 from typing import Optional
+from matthunder_core.scope import ScopeError, validate_target
 
 
 # ─── System prompt — locked to recon/bounty context ────────────────────────
@@ -295,6 +296,12 @@ def ai_parse_to_command(user_message: str, provider: str, api_key: str, model: s
     scan = (cmd.get("scan") or "").lower()
     if scan not in valid_scans:
         return {"ok": False, "error": f"unknown scan type: {scan!r}"}
+    target = cmd.get("target")
+    if scan != "acunetix" and target:
+        try:
+            cmd["target"] = validate_target(str(target))
+        except ScopeError as e:
+            return {"ok": False, "error": f"target blocked: {e}"}
     # Build preview command
     args = [scan]
     target = cmd.get("target")

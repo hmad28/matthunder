@@ -18,6 +18,9 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
 from telegram.error import TelegramError, TimedOut
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
+from matthunder_core import ProgressEvent, ScanRequest, ScopeError
+from matthunder_core import run_scan as core_run_scan
+from matthunder_core.scope import validate_target as core_validate_target
 
 ROOT = Path(__file__).resolve().parent
 MATTHUNDER = ROOT / "matthunder.py"
@@ -225,7 +228,11 @@ def speed_from_args(args):
 
 def scan_running() -> bool:
     p = active_scan.get("process")
-    return p is not None and p.returncode is None
+    if p is None:
+        return False
+    if isinstance(p, asyncio.Task):
+        return not p.done()
+    return getattr(p, "returncode", None) is None
 
 
 def clean_log_line(line: str) -> str:
@@ -1976,7 +1983,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             try:
                 await query.message.reply_text("⛔ Menghentikan scan + child process (nuclei dll)…")
-                _kill_proc_tree(p, grace_s=4.0)
+                if isinstance(p, asyncio.Task):
+                    p.cancel()
+                else:
+                    _kill_proc_tree(p, grace_s=4.0)
                 active_scan.update({"process": None, "target": None, "started_at": None, "step": "Idle", "step_detail": "Belum ada scan berjalan.", "progress_pct": 0, "step_started_at": None})
                 _clear_scan_state()
                 await query.message.reply_text("⛔ Scan dihentikan.")
@@ -1994,7 +2004,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     elif data.startswith("speed:"):
         _, target, speed = data.split(":", 2)
-        await start_deep_scan(query.message, context, target, speed)
+        await start_service_scan(query.message, context, "dps", target, speed)
     elif data == "menu_help":
         await query.message.reply_text(
             "🧭 Help\n\n"
@@ -2682,6 +2692,83 @@ async def start_deep_scan(message_obj, context: ContextTypes.DEFAULT_TYPE, targe
     context.application.create_task(_heartbeat_loop())
 
 
+async def start_service_scan(message_obj, context: ContextTypes.DEFAULT_TYPE, mode: str, target: str, speed: str = "standard"):
+    """Start a scan through the shared service layer."""
+    if scan_running():
+        return await message_obj.reply_text(
+            f"Masih ada scan berjalan.\n\nTarget: {active_scan.get('target')}\nKlik Status atau Stop Scan."
+        )
+    try:
+        target = core_validate_target(target)
+    except ScopeError as e:
+        return await message_obj.reply_text(f"Scope blocked: {e}")
+    if speed not in {"low", "standard", "fast"}:
+        speed = "standard"
+
+    started = await message_obj.reply_text(
+        f"{mode.upper()} scan started\n\n"
+        f"Target: {target}\n"
+        f"Speed: {speed}\n\n"
+        "Progress bisa dicek lewat /status.",
+        reply_markup=main_menu_keyboard(),
+    )
+
+    async def _task():
+        def progress(event: ProgressEvent):
+            active_scan.update({
+                "step": event.stage,
+                "step_detail": event.message,
+                "progress_pct": event.progress_pct,
+                "last_log_line": event.message,
+                "scan_id": event.scan_id,
+            })
+            _save_scan_state()
+
+        result = await asyncio.to_thread(
+            core_run_scan,
+            ScanRequest(mode=mode, target=target, speed=speed),
+            progress,
+        )
+        duration = int(time.time() - (active_scan.get("started_at") or time.time()))
+        active_scan.update({
+            "process": None,
+            "target": None,
+            "started_at": None,
+            "step": "Idle",
+            "step_detail": "Belum ada scan berjalan.",
+            "progress_pct": 0,
+            "step_started_at": None,
+        })
+        _clear_scan_state()
+        if result.ok:
+            await context.bot.send_message(
+                chat_id=message_obj.chat_id,
+                text=f"{mode.upper()} scan completed\n\nTarget: {target}\nDuration: {duration}s\nScan ID: {result.scan_id or '-'}",
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=message_obj.chat_id,
+                text=f"{mode.upper()} scan failed\n\nTarget: {target}\nError: {result.error or 'unknown'}",
+            )
+
+    task = context.application.create_task(_task())
+    active_scan.update({
+        "process": task,
+        "target": target,
+        "started_at": time.time(),
+        "log_path": None,
+        "message_id": started.message_id,
+        "step": "queued",
+        "step_detail": f"{mode.upper()} scan queued",
+        "progress_pct": 0,
+        "last_log_line": "",
+        "step_started_at": time.time(),
+    })
+    _save_scan_state()
+    _write_heartbeat()
+    context.application.create_task(_heartbeat_loop())
+
+
 async def deep(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update):
         return await deny(update)
@@ -2690,7 +2777,45 @@ async def deep(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("🧬 Kirim domain target sekarang.\nContoh: example.com")
     target = normalize_target(context.args[0])
     speed = speed_from_args(context.args)
-    await start_deep_scan(update.message, context, target, speed)
+    await start_service_scan(update.message, context, "dps", target, speed)
+
+
+async def service_mode_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str):
+    if not is_owner(update):
+        return await deny(update)
+    if not context.args:
+        return await update.message.reply_text(f"Usage: /{mode} example.com [low|standard|fast]")
+    target = normalize_target(context.args[0])
+    speed = speed_from_args(context.args)
+    await start_service_scan(update.message, context, mode, target, speed)
+
+
+async def light(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await service_mode_cmd(update, context, "lts")
+
+
+async def dark(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await service_mode_cmd(update, context, "dks")
+
+
+async def blh_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await service_mode_cmd(update, context, "blh")
+
+
+async def tpa_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await service_mode_cmd(update, context, "tpa")
+
+
+async def cred_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await service_mode_cmd(update, context, "cred")
+
+
+async def takeover_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await service_mode_cmd(update, context, "tov")
+
+
+async def sensitive_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await service_mode_cmd(update, context, "sens")
 
 
 # SCAN_STATE_PATH is re-defined at the end of the --bot-dir logic above;
@@ -2925,6 +3050,9 @@ def _kill_proc_tree(proc, grace_s: float = 3.0):
     """
     if proc is None:
         return
+    if isinstance(proc, asyncio.Task):
+        proc.cancel()
+        return
     if proc.returncode is not None:
         return
     pid = getattr(proc, "pid", None)
@@ -3016,7 +3144,10 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("✅ Tidak ada scan berjalan.")
     try:
         await update.message.reply_text("⛔ Menghentikan scan + child process (nuclei dll)…")
-        _kill_proc_tree(p, grace_s=4.0)
+        if isinstance(p, asyncio.Task):
+            p.cancel()
+        else:
+            _kill_proc_tree(p, grace_s=4.0)
         active_scan.update({"process": None, "target": None, "started_at": None, "step": "Idle", "step_detail": "Belum ada scan berjalan.", "progress_pct": 0, "step_started_at": None})
         _clear_scan_state()
         await update.message.reply_text("⛔ Scan dihentikan.")
@@ -3985,6 +4116,14 @@ def main():
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("setup", setup_cmd))
     app.add_handler(CommandHandler("deep", deep))
+    app.add_handler(CommandHandler("light", light))
+    app.add_handler(CommandHandler("dark", dark))
+    app.add_handler(CommandHandler("blh", blh_cmd))
+    app.add_handler(CommandHandler("tpa", tpa_cmd))
+    app.add_handler(CommandHandler("thirdparty", tpa_cmd))
+    app.add_handler(CommandHandler("cred", cred_cmd))
+    app.add_handler(CommandHandler("takeover", takeover_cmd))
+    app.add_handler(CommandHandler("sensitive", sensitive_cmd))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("stop", stop))
     app.add_handler(CommandHandler("report", report))

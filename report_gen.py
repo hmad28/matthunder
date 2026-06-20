@@ -17,6 +17,7 @@ import os
 import re
 import sqlite3
 import time
+import zipfile
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -258,12 +259,40 @@ def _txt_doc(target: str, findings: list[dict], meta: dict) -> str:
     return "\n".join(lines)
 
 
+def _md_doc(target: str, findings: list[dict], meta: dict) -> str:
+    lines = [
+        f"# matthunder scan report - {target}",
+        "",
+        f"- Generated: {meta.get('generated_at')}",
+        f"- Findings: {len(findings)}",
+        "",
+        "## Findings",
+        "",
+    ]
+    if not findings:
+        lines.append("_No findings for this target._")
+        return "\n".join(lines)
+    for i, f in enumerate(findings, 1):
+        lines.extend([
+            f"### {i}. {f['severity'].upper()} - {f['template']}",
+            "",
+            f"- Source: `{f['source']}`",
+            f"- URL: `{f['url']}`",
+        ])
+        if f["extra"]:
+            lines.append(f"- Detail: `{f['extra']}`")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def generate(target: str, out_dir: str = REPORT_DIR) -> dict:
     os.makedirs(out_dir, exist_ok=True)
     findings = collect_findings(target)
     ts = time.strftime("%Y%m%d_%H%M%S")
     html_path = os.path.join(out_dir, f"{target}_{ts}.html")
     txt_path = os.path.join(out_dir, f"{target}_{ts}.txt")
+    md_path = os.path.join(out_dir, f"{target}_{ts}.md")
+    zip_path = os.path.join(out_dir, f"{target}_{ts}.zip")
     meta = {
         "target": target,
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
@@ -273,7 +302,13 @@ def generate(target: str, out_dir: str = REPORT_DIR) -> dict:
         f.write(_html_doc(target, findings, meta))
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write(_txt_doc(target, findings, meta))
-    return {"html": html_path, "txt": txt_path, "findings": len(findings)}
+    with open(md_path, "w", encoding="utf-8") as f:
+        f.write(_md_doc(target, findings, meta))
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.write(html_path, arcname=os.path.basename(html_path))
+        zf.write(txt_path, arcname=os.path.basename(txt_path))
+        zf.write(md_path, arcname=os.path.basename(md_path))
+    return {"html": html_path, "txt": txt_path, "md": md_path, "zip": zip_path, "findings": len(findings)}
 
 
 def main():
@@ -285,6 +320,8 @@ def main():
     res = generate(args.target, args.output)
     print(f"[OK] HTML: {res['html']}")
     print(f"[OK] TXT:  {res['txt']}")
+    print(f"[OK] MD:   {res['md']}")
+    print(f"[OK] ZIP:  {res['zip']}")
     print(f"[OK] {res['findings']} findings collected")
 
 

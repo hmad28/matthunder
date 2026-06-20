@@ -8,6 +8,12 @@ Matthunder is a comprehensive bug bounty reconnaissance and vulnerability scanni
 
 ## Architecture
 
+### Shared Core Engine
+- **matthunder_core** - single service layer for CLI, Web, and Telegram surfaces
+- **Scope gatekeeper** - public target validation is enforced before scan execution
+- **Scanner registry metadata** - canonical scanner list with aliases and mode metadata
+- **SQLite progress state** - `scans` rows include `progress_pct`, `current_stage`, and `error_message`
+
 ### Backend (FastAPI + PostgreSQL + Celery)
 - **FastAPI** - Modern async web framework
 - **PostgreSQL** - Robust relational database
@@ -34,6 +40,11 @@ Matthunder is a comprehensive bug bounty reconnaissance and vulnerability scanni
 - **Dark Scan** - Medium recon (adds assetfinder + katana)
 - **Deep Scan** - Full recon (4-stage nuclei + takeover)
 - **Pipeline** - 6-phase automated workflow
+
+### Unified Interfaces
+- **CLI** - `matthunder_cli.py` delegates scan execution through `matthunder_core`
+- **Web** - `web/` uses the same service layer for deep scans, inline scanners, and pipeline runs
+- **Telegram Bot** - `/deep`, `/light`, `/dark`, `/blh`, `/tpa`, `/cred`, `/takeover`, and `/sensitive` share the same scan path
 
 ### Inline Scanners (20+)
 - **Discovery**: BLH, TPA, Cred

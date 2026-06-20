@@ -22,10 +22,11 @@ async def scan_status():
 async def scan_start(body: dict):
     """Start a deep scan.
 
-    Body: {"target": "example.com", "speed": "standard"}
+    Body: {"target": "example.com", "speed": "standard", "mode": "dps"}
     """
     target = (body.get("target") or "").strip().lower()
     speed = (body.get("speed") or "standard").strip().lower()
+    mode = (body.get("mode") or "dps").strip().lower()
     if not target:
         return {"error": "Target is required"}
     if speed not in ("low", "standard", "fast"):
@@ -35,7 +36,7 @@ async def scan_start(body: dict):
     if r.running:
         return {"error": "A scan is already running", **r.status()}
 
-    return await r.start(target, speed)
+    return await r.start(target, speed, mode)
 
 
 @router.post("/stop")

@@ -29,6 +29,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 import matthunder as core
+from matthunder_core import ProgressEvent, ScanRequest, ScopeError, run_scan as core_run_scan
 from matthunder import (
     print_logo,
     light_scan_target,
@@ -312,67 +313,6 @@ def display_menu():
 def run_scan(scan: str, target: str = None, speed: str = "standard",
              list_path: str = None, auto_continue: bool = False, auto_restart: bool = False,
              full: bool = False):
-    if speed in SPEED_ALIAS:
-        speed = SPEED_ALIAS[speed]
-    if speed not in ("low", "standard", "fast"):
-        speed = "standard"
-    core.CMD_LINE_SPEED = speed
-    core.SCAN_SPEED = speed
-
-    if scan == "lts":
-        if not target:
-            return "[!] Light scan butuh target"
-        print(f"\n  {_c(C.G, '[*]')} Starting Light Scan on {_c(C.BD, target)} (speed: {speed})")
-        action = _resolve_resume(target, auto_continue, auto_restart)
-        light_scan_target(target, resume=(action == "continue"))
-        if full:
-            from deep_full import run_full_chain
-            sub_file = os.path.join("subdomain", f"{target}.txt")
-            run_full_chain(target, subdomain_file=sub_file)
-        return f"  {_c(C.G, '[OK]')} Light scan selesai: {target}"
-
-    if scan in ("dks", "dps"):
-        mode = "dark" if scan == "dks" else "deep"
-        if not target:
-            return "[!] Dark/Deep scan butuh target"
-        print(f"\n  {_c(C.G, '[*]')} Starting {mode.title()} Scan on {_c(C.BD, target)} (speed: {speed})")
-        action = _resolve_resume(target, auto_continue, auto_restart)
-        dark_deep_target(mode, target, resume=(action == "continue"))
-        if full:
-            from deep_full import run_full_chain
-            sub_file = os.path.join("subdomain", f"{target}.txt")
-            run_full_chain(target, subdomain_file=sub_file)
-        else:
-            try:
-                from report_gen import generate as gen_report
-                res = gen_report(target)
-                print(f"\n  {_c(C.G, '[REPORT]')} HTML: {res['html']}")
-                print(f"  {_c(C.G, '[REPORT]')} TXT : {res['txt']}")
-                print(f"  {_c(C.G, '[REPORT]')} {res['findings']} findings collected")
-            except Exception as e:
-                print(f"  {_c(C.R, '[!]')} Report generation failed: {e}")
-        return f"  {_c(C.G, '[OK]')} {mode.title()} scan selesai: {target}"
-
-    if scan == "tov":
-        if list_path:
-            if not os.path.isfile(list_path):
-                return f"[!] File tidak ditemukan: {list_path}"
-            print(f"\n  {_c(C.G, '[*]')} Starting Takeover mass scan from {_c(C.BD, list_path)}")
-            takeover_mass_file(list_path, target)
-            return f"  {_c(C.G, '[OK]')} Takeover mass selesai: {list_path}"
-        if target:
-            print(f"\n  {_c(C.G, '[*]')} Starting Takeover scan on {_c(C.BD, target)}")
-            takeover_single(target)
-            return f"  {_c(C.G, '[OK]')} Takeover single selesai: {target}"
-        return "[!] Takeover butuh -t target atau -l list"
-
-    if scan == "sens":
-        if not target:
-            return "[!] Sensitive scan butuh target"
-        print(f"\n  {_c(C.G, '[*]')} Scanning for sensitive data on {_c(C.BD, target)}")
-        find_sensitive_data(target)
-        return f"  {_c(C.G, '[OK]')} Sensitive scan selesai: {target}"
-
     if scan == "acunetix":
         from scanners.acunetix import run_subcommand
         action = (target or "summary").lower()
@@ -390,57 +330,53 @@ def run_scan(scan: str, target: str = None, speed: str = "standard",
                 return f"  {_c(C.R, '[!]')} Acunetix gagal: {result.get('error', '?')}"
             return f"  {_c(C.G, '[OK]')} Acunetix {action} selesai: {result.get('count', result.get('findings', '?'))} items"
         return f"  {_c(C.G, '[OK]')} Acunetix {action} selesai"
+    if speed in SPEED_ALIAS:
+        speed = SPEED_ALIAS[speed]
+    if speed not in ("low", "standard", "fast"):
+        speed = "standard"
 
-    if scan in ("blh", "bac", "cred", "apirecon", "params", "ssti", "cors", "xss",
-                "sqli", "lfi", "crlf", "openredirect", "ssrf", "hostheader", "host", "graphql", "gql",
-                "portscan", "waf", "jsanalysis", "fuzzer",
-                "pipeline", "techfingerprint", "tech", "gfpatterns", "gf", "gate", "validate",
-                "attackrank", "rank"):
-        if not target:
-            return f"[!] {scan.upper()} scan butuh target"
-        from scanners import SCANNER_REGISTRY
-        runner = SCANNER_REGISTRY.get(scan)
-        if not runner:
-            return f"[!] Scanner module {scan} tidak tersedia"
+    if target and scan in ("lts", "dks", "dps", "light", "dark", "deep"):
+        action = _resolve_resume(target, auto_continue, auto_restart)
+        auto_continue = action == "continue"
+        auto_restart = action == "restart"
 
-        scan_labels = {
-            "blh": "Broken Link Hunter", "tpa": "3rd Party Assets",
-            "cred": "Credential URLs", "apirecon": "API Endpoint Recon",
-            "params": "Hidden Parameters", "ssti": "SSTI Probe",
-            "cors": "CORS Misconfiguration", "xss": "XSS Scan (dalfox+manual)",
-            "sqli": "SQL Injection", "lfi": "LFI / Path Traversal",
-            "crlf": "CRLF Injection", "openredirect": "Open Redirect",
-            "ssrf": "SSRF Probe", "hostheader": "Host Header Injection",
-            "host": "Host Header Injection", "graphql": "GraphQL Introspection",
-            "gql": "GraphQL Introspection",
-            "portscan": "Port Scan", "waf": "WAF Detection",
-            "jsanalysis": "JS Analysis", "fuzzer": "Dir/Path Fuzzer",
-            "pipeline": "Full Pipeline", "techfingerprint": "Tech Fingerprint",
-            "tech": "Tech Fingerprint", "gfpatterns": "GF Patterns",
-            "gf": "GF Patterns", "gate": "7-Question Gate",
-            "validate": "7-Question Gate", "attackrank": "Attack Surface Rank",
-            "rank": "Attack Surface Rank",
-        }
-        label = scan_labels.get(scan, scan.upper())
-        print(f"\n  {_c(C.G, '[*]')} Starting {_c(C.BD, label)} on {_c(C.BD, target)}")
+    def _progress(event: ProgressEvent):
+        if event.stage in {"scope-validated", "starting", "done", "failed"}:
+            color = C.G if event.status in {"running", "completed"} else C.R
+            print(f"  {_c(color, '[' + event.stage.upper() + ']')} {event.message}")
 
-        try:
-            result = runner(target)
-        except Exception as e:
-            return f"  {_c(C.R, '[!]')} {scan} error: {e}"
-
-        if isinstance(result, dict) and result.get("ok") is False:
-            return f"  {_c(C.R, '[!]')} {scan} gagal: {result.get('error', 'unknown')}"
-
-        keys = ("endpoints", "params", "probes", "findings", "links_checked", "links_found")
-        summary = next((result[k] for k in keys if k in result), 0)
-        sid = result.get("scan_id", "?")
-        return (
-            f"  {_c(C.G, '[OK]')} {label} selesai: {_c(C.BD, str(summary))} hits\n"
-            f"  {_c(C.D, 'Database:')} matthunder_scans.db  {_c(C.D, 'Scan ID:')} {sid}"
+    try:
+        result = core_run_scan(
+            ScanRequest(
+                mode=scan,
+                target=target,
+                speed=speed,
+                list_path=list_path,
+                auto_continue=auto_continue,
+                auto_restart=auto_restart,
+                full=full,
+            ),
+            callback=_progress,
         )
+    except ScopeError as e:
+        return f"  {_c(C.R, '[!]')} Scope blocked: {e}"
+    except KeyError:
+        return f"[!] Scan tidak dikenal: {scan}"
 
-    return f"[!] Scan tidak dikenal: {scan}"
+    if not result.ok:
+        return f"  {_c(C.R, '[!]')} {scan} gagal: {result.error or 'unknown error'}"
+
+    if result.raw:
+        keys = ("endpoints", "params", "probes", "findings", "links_checked", "links_found")
+        summary = next((result.raw[k] for k in keys if k in result.raw), 0)
+    else:
+        summary = 0
+    sid = result.scan_id or "?"
+    return (
+        f"  {_c(C.G, '[OK]')} {scan} selesai"
+        + (f": {_c(C.BD, str(summary))} hits" if summary else "")
+        + f"\n  {_c(C.D, 'Database:')} matthunder_scans.db  {_c(C.D, 'Scan ID:')} {sid}"
+    )
 
 
 # ─── Interactive menu logic ──────────────────────────────────────────────────

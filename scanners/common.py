@@ -180,6 +180,23 @@ def ensure_schema(con: sqlite3.Connection) -> None:
     CREATE INDEX IF NOT EXISTS idx_results_source ON results(source_url);
     CREATE INDEX IF NOT EXISTS idx_scans_scanner_domain ON scans(scanner, domain);
     """)
+    _ensure_scan_progress_columns(con)
+
+
+def _ensure_scan_progress_columns(con: sqlite3.Connection) -> None:
+    existing = {
+        row["name"] if isinstance(row, sqlite3.Row) else row[1]
+        for row in con.execute("PRAGMA table_info(scans)").fetchall()
+    }
+    migrations = {
+        "progress_pct": "ALTER TABLE scans ADD COLUMN progress_pct INTEGER DEFAULT 0",
+        "current_stage": "ALTER TABLE scans ADD COLUMN current_stage TEXT",
+        "error_message": "ALTER TABLE scans ADD COLUMN error_message TEXT",
+    }
+    for column, sql in migrations.items():
+        if column not in existing:
+            con.execute(sql)
+    con.commit()
 
 
 def open_db() -> sqlite3.Connection:
@@ -192,8 +209,8 @@ def open_db() -> sqlite3.Connection:
 def create_scan(con: sqlite3.Connection, scanner: str, domain: str, params: dict) -> str:
     scan_id = str(uuid.uuid4())
     con.execute(
-        "INSERT INTO scans (id, scanner, domain, params, status, created_at) "
-        "VALUES (?, ?, ?, ?, 'running', ?)",
+        "INSERT INTO scans (id, scanner, domain, params, status, created_at, progress_pct, current_stage) "
+        "VALUES (?, ?, ?, ?, 'running', ?, 0, 'queued')",
         (scan_id, scanner, domain, json.dumps(params or {}), utc_now_iso()),
     )
     con.commit()
@@ -201,11 +218,50 @@ def create_scan(con: sqlite3.Connection, scanner: str, domain: str, params: dict
 
 
 def finish_scan(con: sqlite3.Connection, scan_id: str, status: str = "completed",
-                total_sources: int = 0, total_links: int = 0) -> None:
+                total_sources: int = 0, total_links: int = 0, error_message: str | None = None) -> None:
     con.execute(
-        "UPDATE scans SET status=?, finished_at=?, total_sources=?, total_links=? WHERE id=?",
-        (status, utc_now_iso(), total_sources, total_links, scan_id),
+        "UPDATE scans SET status=?, finished_at=?, total_sources=?, total_links=?, "
+        "progress_pct=?, current_stage=?, error_message=? WHERE id=?",
+        (
+            status,
+            utc_now_iso(),
+            total_sources,
+            total_links,
+            100 if status == "completed" else 0,
+            "done" if status == "completed" else status,
+            error_message,
+            scan_id,
+        ),
     )
+    con.commit()
+
+
+def update_scan_progress(
+    con: sqlite3.Connection,
+    scan_id: str,
+    progress_pct: int | None = None,
+    current_stage: str | None = None,
+    status: str | None = None,
+    error_message: str | None = None,
+) -> None:
+    updates = []
+    values = []
+    if progress_pct is not None:
+        updates.append("progress_pct=?")
+        values.append(max(0, min(100, int(progress_pct))))
+    if current_stage is not None:
+        updates.append("current_stage=?")
+        values.append(str(current_stage)[:200])
+    if status is not None:
+        updates.append("status=?")
+        values.append(status)
+    if error_message is not None:
+        updates.append("error_message=?")
+        values.append(str(error_message)[:1000])
+    if not updates:
+        return
+    values.append(scan_id)
+    con.execute(f"UPDATE scans SET {', '.join(updates)} WHERE id=?", values)
     con.commit()
 
 

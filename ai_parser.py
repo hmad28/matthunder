@@ -3,6 +3,7 @@ import os
 import re
 import sys
 from typing import Optional
+from matthunder_core.scope import ScopeError, validate_target
 
 try:
     import requests
@@ -184,6 +185,10 @@ def _validate(data: dict) -> dict:
         target = target[4:]
     if not target or not DOMAIN_RE.match(target):
         return {"error": f"invalid target: {target!r}"}
+    try:
+        target = validate_target(target)
+    except ScopeError as e:
+        return {"error": f"target blocked: {e}"}
     speed = str(data.get("speed", "standard")).lower().strip()
     if speed not in ALLOWED_SPEEDS:
         speed = "standard"
