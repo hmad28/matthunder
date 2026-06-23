@@ -1,0 +1,2 @@
+[exposed-pki-cert] [http] [high] https://aurograf2.tangerangselatankota.go.id/ [paths="/"]
+[apache-mod-negotiation-listing:exposed_files] [http] [low] https://pnpb.tangerangselatankota.go.id/index ["index.php"] [path="/index"]

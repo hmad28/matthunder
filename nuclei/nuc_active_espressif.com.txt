@@ -1,0 +1,2 @@
+[netlify-headers-config-exposure] [http] [low] https://dashboard.rainmaker.espressif.com/_headers
+[tomcat-stacktraces] [http] [low] https://iotcollege.espressif.com/?f=\[

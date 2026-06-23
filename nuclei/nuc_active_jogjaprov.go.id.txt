@@ -1,0 +1,1 @@
+[CVE-2021-24891] [http] [medium] https://kartamantul.jogjaprov.go.id/wp-content/plugins/elementor/assets/js/frontend.min.js ["3.0.14"]

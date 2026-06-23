@@ -1,247 +1,604 @@
-# Matthunder v2.0 - Total Overhaul
+# Matthunder v2.0
 
-> AI-Powered Bug Hunting & Penetration Testing Automation Platform
+**AI-Powered Bug Hunting & Penetration Testing Automation Platform**
 
-## Overview
+Matthunder is a unified security validation platform with one backend control plane, one scanner orchestration layer, and three first-class clients: Web Dashboard, CLI, and Telegram Bot.
 
-Matthunder is a comprehensive bug bounty reconnaissance and vulnerability scanning automation platform. Version 2.0 represents a complete architectural overhaul with modern technologies.
+## 🎯 Overview
 
-## Architecture
+Matthunder provides operator-supervised, scope-aware, approval-gated automation for authorized security testing. Every high-impact action is guardrailed, auditable, and stoppable.
 
-### Shared Core Engine
-- **matthunder_core** - single service layer for CLI, Web, and Telegram surfaces
-- **Scope gatekeeper** - public target validation is enforced before scan execution
-- **Scanner registry metadata** - canonical scanner list with aliases and mode metadata
-- **SQLite progress state** - `scans` rows include `progress_pct`, `current_stage`, and `error_message`
+### Key Features
 
-### Backend (FastAPI + PostgreSQL + Celery)
-- **FastAPI** - Modern async web framework
-- **PostgreSQL** - Robust relational database
-- **SQLAlchemy 2.0** - Async ORM
-- **Celery + Redis** - Distributed task queue
-- **WebSocket** - Real-time scan logs
+- **Unified Backend Control Plane**: FastAPI-based backend with PostgreSQL, Celery workers, and Redis
+- **Multi-Client Architecture**: Web dashboard, CLI, and Telegram bot all talk to the same backend
+- **Scanner Orchestration**: 20+ inline scanners + Go tool adapters with standardized execution contracts
+- **Approval Workflow**: Dangerous operations require explicit approval before execution
+- **Audit Trail**: Complete audit logging of all actions with user attribution
+- **AI Integration**: Multi-provider AI analysis (OpenAI, Anthropic, Gemini, OpenRouter)
+- **Real-Time Updates**: WebSocket-based live scan log streaming
+- **Scope Enforcement**: Automatic validation of targets against authorized scope
+- **Evidence Management**: Structured evidence collection with file hashing and deduplication
 
-### Frontend (Next.js + TypeScript)
-- **Next.js 14** - React framework with App Router
-- **TypeScript** - Type safety
-- **Tailwind CSS** - Utility-first styling
-- **shadcn/ui** - Accessible components
-- **Zustand** - State management
+## 🏗️ Architecture
 
-### Infrastructure
-- **Docker + Docker Compose** - Containerization
-- **Nginx** - Reverse proxy
-- **Redis** - Cache + message broker
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Client Layer                            │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │ Web Dashboard│  │     CLI      │  │ Telegram Bot │      │
+│  │  (Next.js)   │  │   (Typer)    │  │              │      │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘      │
+└─────────┼──────────────────┼──────────────────┼─────────────┘
+          │                  │                  │
+          └──────────────────┼──────────────────┘
+                             │ HTTPS / WSS
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  Backend Control Plane                        │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │              FastAPI Application                       │  │
+│  │  • Authentication (JWT + Refresh Tokens + API Keys)   │  │
+│  │  • Rate Limiting (slowapi)                            │  │
+│  │  • CORS & Security Headers                            │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                                                              │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │ Auth Service │  │ Audit Service│  │Approval Svc  │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │           Scanner Adapter Registry                     │  │
+│  │  • Go Tool Adapters (subfinder, httpx, nuclei, etc.) │  │
+│  │  • Inline Python Scanners (XSS, SQLi, LFI, etc.)     │  │
+│  │  • Standardized Input/Output Contracts                 │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │              Celery Worker Pool                        │  │
+│  │  • Scan Execution Workers                             │  │
+│  │  • AI Analysis Workers                                │  │
+│  │  • Report Generation Workers                          │  │
+│  └──────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+          │                  │                  │
+          ▼                  ▼                  ▼
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│  PostgreSQL  │  │    Redis     │  │ File Storage │
+│   (Database) │  │ (Cache+Queue)│  │  (Evidence)  │
+└──────────────┘  └──────────────┘  └──────────────┘
+```
 
-## Features
-
-### Scanning
-- **Light Scan** - Quick recon (subfinder + httpx + nuclei)
-- **Dark Scan** - Medium recon (adds assetfinder + katana)
-- **Deep Scan** - Full recon (4-stage nuclei + takeover)
-- **Pipeline** - 6-phase automated workflow
-
-### Unified Interfaces
-- **CLI** - `matthunder_cli.py` delegates scan execution through `matthunder_core`
-- **Web** - `web/` uses the same service layer for deep scans, inline scanners, and pipeline runs
-- **Telegram Bot** - `/deep`, `/light`, `/dark`, `/blh`, `/tpa`, `/cred`, `/takeover`, and `/sensitive` share the same scan path
-
-### Inline Scanners (20+)
-- **Discovery**: BLH, TPA, Cred
-- **Vulnerability**: SSTI, CORS, XSS, SQLi, LFI, CRLF, Open Redirect, SSRF, Host Header, GraphQL
-- **Infrastructure**: Port Scan, WAF Detection, JS Analysis, Fuzzer, Tech Fingerprint, Attack Rank, GF Patterns
-
-### AI Integration
-- Multi-provider support (OpenAI, Anthropic, Gemini, OpenRouter)
-- AI-powered vulnerability analysis
-- Automated hunting with context
-- Remediation suggestions
-
-### Integrations
-- **Acunetix** - Pull scans and vulnerabilities
-- **WebSocket** - Real-time log streaming
-- **REST API** - Full programmatic access
-
-## Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
+
 - Docker & Docker Compose
-- Git
+- Python 3.10+ (for local development)
+- Node.js 20+ (for frontend development)
 
-### Installation
+### 1. Clone the Repository
 
-1. Clone the repository:
 ```bash
 git clone https://github.com/hmad28/matthunder.git
 cd matthunder
 ```
 
-2. Configure environment:
+### 2. Configure Environment
+
+Create a `.env` file in the root directory:
+
 ```bash
-cp backend/.env.example backend/.env
-# Edit backend/.env with your settings
+# Database
+POSTGRES_USER=matthunder
+POSTGRES_PASSWORD=your-secure-password-here
+POSTGRES_DB=matthunder
+
+# Backend
+SECRET_KEY=your-super-secret-key-min-32-chars
+CORS_ORIGINS=["http://localhost:3000"]
+
+# Optional: AI Providers
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+GEMINI_API_KEY=...
+OPENROUTER_API_KEY=...
+
+# Optional: Telegram Bot
+MATTHUNDER_BOT_TOKEN=...
+MATTHUNDER_OWNER_ID=...
+MATTHUNDER_API_TOKEN=...
 ```
 
-3. Start all services:
+### 3. Start with Docker Compose
+
 ```bash
 docker-compose up -d
 ```
 
-4. Access the application:
-- **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs
+This starts:
+- **PostgreSQL** on port 5432
+- **Redis** on port 6379
+- **Backend API** on port 8000
+- **Celery Worker** (background tasks)
+- **Celery Beat** (scheduled tasks)
+- **Frontend** on port 3000
+- **Nginx** reverse proxy on port 80
 
-## Development
+### 4. Access the Platform
 
-### Backend
+- **Web Dashboard**: http://localhost:3000
+- **API Documentation**: http://localhost:8000/docs
+- **API (via Nginx)**: http://localhost/api/v1/
+
+### 5. Create Your First User
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "email": "admin@example.com", "password": "securepassword"}'
+```
+
+## 📚 Usage
+
+### Web Dashboard
+
+1. Navigate to http://localhost:3000
+2. Login with your credentials
+3. Add a target: **Targets** → **Add Target**
+4. Start a scan: **Scans** → **New Scan**
+5. View real-time logs via WebSocket
+6. Review findings in the **Findings** tab
+7. Generate reports in the **Reports** tab
+
+### CLI
+
+Install the CLI:
+
+```bash
+cd cli
+pip install -e .
+```
+
+Login:
+
+```bash
+matthunder login --username admin --password securepassword
+```
+
+Manage targets:
+
+```bash
+# List targets
+matthunder targets list
+
+# Add target
+matthunder targets add --domain example.com
+
+# Delete target
+matthunder targets delete --id <target-id>
+```
+
+Run scans:
+
+```bash
+# Start a deep scan
+matthunder scan <target-id> --type deep --speed standard
+
+# List recent scans
+matthunder scans --limit 10
+
+# View scan logs
+matthunder logs <scan-id> --limit 100
+
+# Cancel a running scan
+matthunder cancel <scan-id>
+```
+
+View findings:
+
+```bash
+# List all findings
+matthunder findings --limit 50
+
+# Filter by severity
+matthunder findings --severity critical
+
+# Filter by scan
+matthunder findings --scan <scan-id>
+```
+
+Manage approvals:
+
+```bash
+# List pending approvals
+matthunder approvals --status pending
+
+# Approve a request
+matthunder review-approval <approval-id> approve --comment "Looks good"
+
+# Reject a request
+matthunder review-approval <approval-id> reject --comment "Out of scope"
+```
+
+Download reports:
+
+```bash
+# List available reports
+matthunder reports --limit 20
+
+# Download a report
+matthunder download-report <report-id> --output report.pdf
+```
+
+JSON output mode:
+
+```bash
+# All commands support --json flag for machine-readable output
+matthunder targets list --json
+matthunder findings --json
+```
+
+### Telegram Bot
+
+1. Create a bot via [@BotFather](https://t.me/BotFather)
+2. Set environment variables:
+   ```bash
+   export MATTHUNDER_BOT_TOKEN="your-bot-token"
+   export MATTHUNDER_OWNER_ID="your-telegram-user-id"
+   export MATTHUNDER_API_TOKEN="your-api-token"
+   ```
+3. Start the bot:
+   ```bash
+   cd bot
+   pip install -r requirements.txt
+   python telegram_bot/main.py
+   ```
+4. In Telegram:
+   - `/start` - Show main menu
+   - `/targets` - List targets
+   - `/scans` - Show recent scans
+   - `/findings` - Show recent findings
+   - `/approvals` - View pending approvals
+   - `/cancel <scan-id>` - Cancel a running scan
+   - `/settings` - View configuration
+   - `/help` - Show help
+
+## 🔒 Security Model
+
+### Authentication
+
+- **JWT Access Tokens**: Short-lived (30 minutes), used for API requests
+- **Refresh Tokens**: Long-lived (7 days), stored in database, rotatable
+- **API Keys**: For service accounts (CLI, bot, integrations)
+
+### Authorization
+
+- **Owner Validation**: All resources validate ownership before access
+- **Superuser Role**: Elevated privileges for admin operations
+- **Scope Enforcement**: Targets are validated against authorized scope before scanning
+
+### Approval Workflow
+
+Dangerous operations require explicit approval:
+
+- Deep scans (resource-intensive)
+- AI-powered hunting (costly)
+- Bulk operations
+- Out-of-scope targets
+
+Approval requests can be reviewed via:
+- Web Dashboard (Approvals page)
+- CLI (`matthunder approvals`, `matthunder review-approval`)
+- Telegram Bot (`/approvals` command)
+
+### Audit Trail
+
+All actions are logged with:
+- User ID
+- Action type
+- Resource type and ID
+- Timestamp
+- IP address
+- User agent
+
+View audit logs:
+- Web Dashboard (Admin → Audit Logs)
+- API: `GET /api/v1/audit`
+
+### Network Guardrails
+
+- Private IP ranges blocked by default (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+- Localhost blocked (127.0.0.1, ::1)
+- Local domains blocked (.local, .lan, .internal)
+- Explicit authorization required for private ranges
+
+### Rate Limiting
+
+- API: 30 requests/minute per IP (burst: 20)
+- Login: 5 requests/minute per IP (burst: 3)
+- Configurable via slowapi
+
+### Security Headers
+
+All responses include:
+- `X-Frame-Options: SAMEORIGIN`
+- `X-Content-Type-Options: nosniff`
+- `X-XSS-Protection: 1; mode=block`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Content-Security-Policy`: Configured for self-hosted resources
+
+## 🛠️ Development
+
+### Local Backend Development
+
 ```bash
 cd backend
 python -m venv venv
 source venv/bin/activate  # or venv\Scripts\activate on Windows
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+pip install -r requirements-local.txt
+
+# Run with SQLite (no PostgreSQL needed)
+uvicorn app.main:app --reload --port 8000
 ```
 
-### Frontend
+### Local Frontend Development
+
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
+### Running Tests
+
+```bash
+# Backend tests
+cd backend
+pytest
+
+# Frontend E2E tests
+cd frontend
+npm run e2e
+```
+
 ### Database Migrations
+
 ```bash
 cd backend
+
+# Generate migration
+alembic revision --autogenerate -m "description"
+
+# Apply migrations
 alembic upgrade head
+
+# Rollback
+alembic downgrade -1
 ```
 
-## Configuration
+## 📊 Scanner Categories
 
-### Environment Variables
+### Discovery
+- **BLH**: Broken Link Hunter
+- **TPA**: Third-Party Asset discovery
+- **Cred**: Credential URL finder
 
-#### Backend (.env)
-```env
-# Database
-DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/matthunder
+### Vulnerability
+- **SSTI**: Server-Side Template Injection
+- **CORS**: CORS Misconfiguration
+- **XSS**: Cross-Site Scripting
+- **SQLi**: SQL Injection
+- **LFI**: Local File Inclusion
+- **CRLF**: CRLF Injection
+- **OpenRedirect**: Open Redirect
+- **SSRF**: Server-Side Request Forgery
+- **HostHeader**: Host Header Injection
+- **GraphQL**: GraphQL Introspection
 
-# Redis
-REDIS_URL=redis://localhost:6379/0
+### Infrastructure
+- **PortScan**: Port scanning
+- **WAF**: Web Application Firewall detection
+- **JSAnalysis**: JavaScript analysis
+- **Fuzzer**: Directory/path fuzzing
+- **TechFingerprint**: Technology fingerprinting
+- **AttackRank**: Attack surface ranking
+- **GFPatterns**: GF pattern filtering
 
-# AI Providers (BYOK)
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-GEMINI_API_KEY=...
-OPENROUTER_API_KEY=sk-or-...
+## 🔌 API Reference
 
-# Acunetix
-ACUNETIX_URL=https://localhost:3443
-ACUNETIX_API_KEY=your_key
-```
-
-#### Frontend (.env.local)
-```env
-NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_WS_URL=ws://localhost:8000
-```
-
-## API Documentation
-
-Interactive API documentation available at:
+Full API documentation available at:
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
+- **OpenAPI JSON**: http://localhost:8000/openapi.json
 
-### Key Endpoints
+### Authentication Endpoints
 
-#### Authentication
 - `POST /api/v1/auth/register` - Register new user
-- `POST /api/v1/auth/login` - Login and get token
+- `POST /api/v1/auth/login` - Login (HTTP Basic Auth)
+- `POST /api/v1/auth/refresh` - Refresh access token
+- `POST /api/v1/auth/logout` - Logout (revoke tokens)
+- `GET /api/v1/auth/me` - Get current user
+- `POST /api/v1/auth/api-keys` - Create API key
+- `GET /api/v1/auth/api-keys` - List API keys
+- `DELETE /api/v1/auth/api-keys/{key_id}` - Revoke API key
 
-#### Targets
+### Target Endpoints
+
 - `GET /api/v1/targets` - List targets
 - `POST /api/v1/targets` - Create target
+- `GET /api/v1/targets/{id}` - Get target
+- `PUT /api/v1/targets/{id}` - Update target
 - `DELETE /api/v1/targets/{id}` - Delete target
 
-#### Scans
+### Scan Endpoints
+
 - `GET /api/v1/scans` - List scans
-- `POST /api/v1/scans` - Start scan
-- `GET /api/v1/scans/{id}/status` - Get scan status
-- `WS /api/v1/scans/{id}/ws` - Real-time logs
+- `POST /api/v1/scans` - Create scan
+- `GET /api/v1/scans/{id}` - Get scan
+- `POST /api/v1/scans/{id}/stop` - Stop scan
+- `GET /api/v1/scans/{id}/logs` - Get scan logs
+- `WS /api/v1/scans/{id}/ws` - WebSocket for real-time logs
 
-#### Findings
+### Finding Endpoints
+
 - `GET /api/v1/findings` - List findings
-- `GET /api/v1/findings/stats` - Get statistics
+- `GET /api/v1/findings/stats` - Get finding statistics
+- `GET /api/v1/findings/{id}` - Get finding
+- `PUT /api/v1/findings/{id}` - Update finding
 
-#### Scanners
+### Approval Endpoints
+
+- `POST /api/v1/approvals` - Create approval request
+- `GET /api/v1/approvals` - List approval requests
+- `GET /api/v1/approvals/{id}` - Get approval request
+- `POST /api/v1/approvals/{id}/review` - Review approval
+- `POST /api/v1/approvals/{id}/cancel` - Cancel approval
+
+### Audit Endpoints
+
+- `GET /api/v1/audit` - List audit logs (superuser)
+- `GET /api/v1/audit/me` - Get current user's audit logs
+- `GET /api/v1/audit/me/activity` - Get activity summary
+
+### Scanner Endpoints
+
 - `GET /api/v1/scanners` - List available scanners
 - `POST /api/v1/scanners/{name}/run` - Run scanner
 
-#### AI
+### AI Endpoints
+
 - `GET /api/v1/ai/providers` - List AI providers
-- `POST /api/v1/ai/analyze` - Analyze with AI
-- `POST /api/v1/ai/hunt` - AI-powered hunting
+- `POST /api/v1/ai/analyze` - Run AI analysis
+- `POST /api/v1/ai/hunt` - Run AI-powered hunting
 
-## Project Structure
+### Report Endpoints
 
+- `GET /api/v1/reports` - List reports
+- `GET /api/v1/reports/{id}` - Get report
+- `GET /api/v1/reports/{id}/download` - Download report
+
+## 🐳 Docker Deployment
+
+### Production Deployment
+
+1. Set strong passwords in `.env`:
+   ```bash
+   POSTGRES_PASSWORD=your-strong-password
+   SECRET_KEY=your-strong-secret-key
+   ```
+
+2. Start services:
+   ```bash
+   docker-compose up -d
+   ```
+
+3. Check logs:
+   ```bash
+   docker-compose logs -f
+   ```
+
+4. Stop services:
+   ```bash
+   docker-compose down
+   ```
+
+### Scaling Workers
+
+Edit `docker-compose.yml`:
+
+```yaml
+celery-worker:
+  command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=8
 ```
-matthunder/
-├── backend/
-│   ├── app/
-│   │   ├── api/v1/          # API routes
-│   │   ├── core/            # Core utilities
-│   │   ├── models/          # SQLAlchemy models
-│   │   ├── schemas/         # Pydantic schemas
-│   │   ├── services/        # Business logic
-│   │   └── tasks/           # Celery tasks
-│   ├── alembic/             # Database migrations
-│   └── requirements.txt
-│
-├── frontend/
-│   ├── src/
-│   │   ├── app/             # Next.js pages
-│   │   ├── components/      # React components
-│   │   ├── lib/             # Utilities
-│   │   └── types/           # TypeScript types
-│   └── package.json
-│
-├── docker/
-│   └── nginx/               # Nginx config
-│
-└── docker-compose.yml
+
+Or run multiple workers:
+
+```bash
+docker-compose up -d --scale celery-worker=4
 ```
 
-## Security Notice
+## 📝 Configuration
 
-This tool is for **authorized security testing only**. You are responsible for how you use it. Do not scan targets without explicit permission.
+### Backend Configuration
 
-## License
+All backend configuration via environment variables in `backend/.env`:
 
-MIT License - See LICENSE file for details
+- `DATABASE_URL`: PostgreSQL connection string
+- `REDIS_URL`: Redis connection string
+- `CELERY_BROKER_URL`: Celery broker URL
+- `SECRET_KEY`: JWT signing key (min 32 chars)
+- `CORS_ORIGINS`: Allowed CORS origins (JSON array)
+- `ACCESS_TOKEN_EXPIRE_MINUTES`: JWT expiration (default: 30)
+- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.: AI provider keys
+- `ACUNETIX_URL`, `ACUNETIX_API_KEY`: Acunetix integration
 
-## Author
+### Frontend Configuration
 
-**Matt (hmad28)**
-- GitHub: [@hmad28](https://github.com/hmad28)
-- Repository: [hmad28/matthunder](https://github.com/hmad28/matthunder)
+Environment variables in `frontend/.env.local`:
 
-## Contributing
+- `NEXT_PUBLIC_API_URL`: Backend API URL
+- `NEXT_PUBLIC_WS_URL`: WebSocket URL
 
-Contributions are welcome! Please read our contributing guidelines before submitting PRs.
+## 🔄 Migration from v1
 
-## Changelog
+The v2 architecture is a complete rewrite. Key changes:
 
-### v2.0.0 (2026)
-- Complete architectural overhaul
-- Migrated to FastAPI + PostgreSQL backend
-- New Next.js + TypeScript frontend
-- Added Celery for async task processing
-- WebSocket support for real-time logs
-- Multi-provider AI integration
-- Docker containerization
-- 20+ inline vulnerability scanners
-- Full REST API with OpenAPI docs
+- **Database**: SQLite → PostgreSQL (with migration support)
+- **Authentication**: None → JWT + Refresh Tokens + API Keys
+- **Task Queue**: Synchronous → Celery + Redis
+- **Real-Time**: None → WebSocket
+- **Frontend**: Legacy SPA → Next.js 16 + TypeScript
+- **CLI**: Monolithic script → Typer-based modular CLI
+- **Bot**: Single-owner → Multi-user with approval workflow
 
-### v1.x (Legacy)
-- Original CLI-based tool
-- SQLite database
-- Basic Telegram bot integration
+### Migrating Data
+
+1. Export data from v1 SQLite database
+2. Transform to v2 schema
+3. Import via API or direct database insertion
+
+See `docs/migration-guide.md` for detailed instructions.
+
+## 🤝 Contributing
+
+Contributions welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Submit a pull request
+
+## 📄 License
+
+MIT License - see LICENSE file for details
+
+## ⚠️ Disclaimer
+
+Matthunder is designed for **authorized security testing only**. Users must:
+
+- Have explicit permission to test target systems
+- Comply with all applicable laws and regulations
+- Follow responsible disclosure practices
+- Use the platform ethically and responsibly
+
+The developers are not responsible for misuse or unauthorized testing.
+
+## 🙏 Acknowledgments
+
+Built with:
+- FastAPI
+- SQLAlchemy
+- Celery
+- Next.js
+- React
+- Typer
+- python-telegram-bot
+- And many more open-source libraries
+
+---
+
+**Version**: 2.0.0  
+**Last Updated**: 2026-01-20  
+**Repository**: https://github.com/hmad28/matthunder

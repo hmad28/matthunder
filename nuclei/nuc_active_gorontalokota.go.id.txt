@@ -1,0 +1,3 @@
+[CVE-2021-20323] [http] [medium] https://sso.gorontalokota.go.id/realms/master/clients-registrations/default
+[cgi-printenv] [http] [medium] https://yanjak.gorontalokota.go.id/cgi-bin/printenv.pl
+[keycloak-admin-console-config] [http] [low] https://sso.gorontalokota.go.id/admin/master/console/config

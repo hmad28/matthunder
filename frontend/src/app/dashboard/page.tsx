@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Target, Scan, AlertTriangle, FileText } from 'lucide-react'
-import { api } from '@/lib/api'
+import { publicApi } from '@/lib/api'
 
 interface DashboardStats {
   targets: number
@@ -28,12 +28,12 @@ export default function DashboardPage() {
   const loadStats = async () => {
     try {
       const [targets, scans, findings, reports] = await Promise.all([
-        api.get('/api/v1/targets'),
-        api.get('/api/v1/scans'),
-        api.get('/api/v1/findings'),
-        api.get('/api/v1/reports')
+        publicApi.get('/api/v1/public/targets'),
+        publicApi.get('/api/v1/public/scans'),
+        publicApi.get('/api/v1/public/findings'),
+        publicApi.get('/api/v1/public/reports')
       ])
-      
+
       setStats({
         targets: targets.data.length,
         scans: scans.data.length,

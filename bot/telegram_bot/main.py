@@ -1,5 +1,5 @@
 """
-matthunder Telegram Bot v2.0 - Upgraded with conversation handlers
+matthunder Telegram Bot v2.0 - Enhanced with approval workflow and notifications
 """
 import os
 import logging
@@ -29,7 +29,7 @@ API_URL = os.getenv("MATTHUNDER_API_URL", "http://localhost:8000")
 API_TOKEN = os.getenv("MATTHUNDER_API_TOKEN", "")
 
 # Conversation states
-SELECTING_TARGET, SELECTING_SCAN_TYPE, SELECTING_SPEED, CONFIRMING = range(4)
+SELECTING_TARGET, SELECTING_SCAN_TYPE, SELECTING_SPEED, CONFIRMING, AWAITING_AI_PROMPT = range(5)
 
 
 def get_client() -> httpx.AsyncClient:
@@ -44,7 +44,23 @@ def check_owner(func):
     """Decorator to check if user is owner"""
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.effective_user.id != OWNER_ID:
-            await update.message.reply_text("⛔ Access denied. You are not the owner.")
+            if update.message:
+                await update.message.reply_text("⛔ Access denied. You are not the owner.")
+            elif update.callback_query:
+                await update.callback_query.answer()
+                await update.callback_query.message.reply_text("⛔ Access denied. You are not the owner.")
+            return ConversationHandler.END
+        return await func(update, context)
+    return wrapper
+
+
+def check_callback_owner(func):
+    """Decorator to check owner for callback queries"""
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.effective_user.id != OWNER_ID:
+            query = update.callback_query
+            await query.answer()
+            await query.message.reply_text("⛔ Access denied. You are not the owner.")
             return ConversationHandler.END
         return await func(update, context)
     return wrapper
@@ -377,12 +393,14 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /targets - List all targets
 /scans - Show recent scans
 /findings - Show recent findings
+/approvals - View pending approvals
 /settings - View configuration
 /help - Show this help message
 
 *Features:*
 • Start scans from target list
-• View scan results
+• View scan results and findings
+• Approve/reject scan requests
 • AI-powered analysis
 • Real-time notifications
 
@@ -404,6 +422,126 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+@check_owner
+async def show_approvals(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show pending approval requests"""
+    try:
+        async with get_client() as client:
+            response = await client.get("/api/v1/approvals?status_filter=pending&limit=10")
+            response.raise_for_status()
+            approvals = response.json()
+        
+        if not approvals:
+            if update.callback_query:
+                await update.callback_query.message.reply_text("✅ No pending approvals.")
+            else:
+                await update.message.reply_text("✅ No pending approvals.")
+            return
+        
+        message = "⏳ *Pending Approvals:*\n\n"
+        keyboard = []
+        
+        for approval in approvals[:5]:
+            approval_id = approval['id'][:8]
+            req_type = approval.get('request_type', 'unknown')
+            reason = approval.get('reason', 'No reason provided')[:50]
+            
+            message += f"• *{req_type}* - `{approval_id}...`\n"
+            message += f"  Reason: {reason}\n\n"
+            
+            # Add approve/reject buttons
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"✅ Approve {approval_id}",
+                    callback_data=f"approve_{approval['id']}"
+                ),
+                InlineKeyboardButton(
+                    f"❌ Reject {approval_id}",
+                    callback_data=f"reject_{approval['id']}"
+                )
+            ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        if update.callback_query:
+            await update.callback_query.message.reply_text(
+                message,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text(
+                message,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+    except Exception as e:
+        if update.callback_query:
+            await update.callback_query.message.reply_text(f"❌ Error: {e}")
+        else:
+            await update.message.reply_text(f"❌ Error: {e}")
+
+
+@check_callback_owner
+async def handle_approval_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle approve/reject callback"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    parts = data.split('_', 1)
+    action = parts[0]  # approve or reject
+    approval_id = parts[1]
+    
+    try:
+        decision = "approved" if action == "approve" else "rejected"
+        
+        async with get_client() as client:
+            response = await client.post(
+                f"/api/v1/approvals/{approval_id}/review",
+                json={"status": decision, "comment": "Approved via Telegram bot"}
+            )
+            response.raise_for_status()
+        
+        emoji = "✅" if action == "approve" else "❌"
+        await query.message.reply_text(
+            f"{emoji} Approval {decision}\n\n"
+            f"Approval ID: `{approval_id[:8]}...`",
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        await query.message.reply_text(f"❌ Error: {e}")
+
+
+@check_owner
+async def cancel_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel a running scan"""
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /cancel <scan_id>\n\n"
+            "Use /scans to see recent scans."
+        )
+        return
+    
+    scan_id = context.args[0]
+    
+    try:
+        async with get_client() as client:
+            response = await client.post(f"/api/v1/scans/{scan_id}/stop")
+            response.raise_for_status()
+            scan = response.json()
+        
+        await update.message.reply_text(
+            f"✅ Scan cancelled\n\n"
+            f"Scan ID: `{scan['id'][:8]}...`\n"
+            f"Status: {scan['status']}",
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+@check_owner
 @check_owner
 async def handle_ai_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle AI analysis prompt"""
@@ -458,7 +596,7 @@ def main():
     ai_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(button_handler, pattern="^ai$")],
         states={
-            SELECTING_TARGET: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_ai_prompt)],
+            AWAITING_AI_PROMPT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_ai_prompt)],
         },
         fallbacks=[],
     )
@@ -468,9 +606,23 @@ def main():
     application.add_handler(CommandHandler("targets", show_targets))
     application.add_handler(CommandHandler("scans", show_scans))
     application.add_handler(CommandHandler("findings", show_findings))
+    application.add_handler(CommandHandler("approvals", show_approvals))
+    application.add_handler(CommandHandler("cancel", cancel_scan))
     application.add_handler(CommandHandler("settings", show_settings))
     application.add_handler(CommandHandler("help", show_help))
     application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(CallbackQueryHandler(handle_approval_action, pattern="^(approve|reject)_"))
+    application.add_handler(scan_conv_handler)
+    application.add_handler(ai_conv_handler)
+    
+    # Start the bot
+    logger.info("Starting bot...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()
+ackQueryHandler(button_handler))
     application.add_handler(scan_conv_handler)
     application.add_handler(ai_conv_handler)
     

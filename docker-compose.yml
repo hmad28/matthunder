@@ -70,7 +70,7 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://matthunder:matthunder@postgres:5432/matthunder
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-matthunder}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-matthunder}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
@@ -141,6 +141,11 @@ services:
       - frontend
 
 volumes:
+  postgres_data:
+  redis_data:
+  scan_data:
+  report_data:
+s:
   postgres_data:
   redis_data:
   scan_data:

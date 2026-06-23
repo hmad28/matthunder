@@ -1,0 +1,1 @@
+[detect-dangling-cname] [dns] [info] cdn.course-net.com ["1425356073.rsc.cdn77.org"]

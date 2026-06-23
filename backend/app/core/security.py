@@ -1,5 +1,5 @@
 """
-Security utilities for authentication and authorization
+Security utilities (simplified for open source)
 """
 from datetime import datetime, timedelta
 from typing import Optional

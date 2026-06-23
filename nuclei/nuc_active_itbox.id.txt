@@ -1,0 +1,1 @@
+[wordpress-debug-log] [http] [low] https://dev.itbox.id/wp-content/debug.log ["12430 bytes"] [paths="wp-content"]

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Play, Square, Loader2 } from 'lucide-react'
-import { api } from '@/lib/api'
+import { publicApi, api } from '@/lib/api'
 
 interface Scan {
   id: string
@@ -38,8 +38,8 @@ export default function ScansPage() {
   const loadData = async () => {
     try {
       const [scansRes, targetsRes] = await Promise.all([
-        api.get('/api/v1/scans'),
-        api.get('/api/v1/targets')
+        publicApi.get('/api/v1/public/scans'),
+        publicApi.get('/api/v1/public/targets')
       ])
       setScans(scansRes.data)
       setTargets(targetsRes.data)
@@ -52,7 +52,7 @@ export default function ScansPage() {
 
   const startScan = async () => {
     if (!selectedTarget) return
-    
+
     setStarting(true)
     try {
       await api.post('/api/v1/scans', {

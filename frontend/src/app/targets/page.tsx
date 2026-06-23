@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Plus, Trash2 } from 'lucide-react'
-import { api } from '@/lib/api'
+import { publicApi, api } from '@/lib/api'
 
 interface Target {
   id: string
@@ -24,7 +24,7 @@ export default function TargetsPage() {
 
   const loadTargets = async () => {
     try {
-      const response = await api.get('/api/v1/targets')
+      const response = await publicApi.get('/api/v1/public/targets')
       setTargets(response.data)
     } catch (error) {
       console.error('Failed to load targets:', error)
@@ -35,7 +35,7 @@ export default function TargetsPage() {
 
   const addTarget = async () => {
     if (!newDomain.trim()) return
-    
+
     try {
       await api.post('/api/v1/targets', { domain: newDomain.trim() })
       setNewDomain('')
@@ -47,7 +47,7 @@ export default function TargetsPage() {
 
   const deleteTarget = async (id: string) => {
     if (!confirm('Are you sure you want to delete this target?')) return
-    
+
     try {
       await api.delete(`/api/v1/targets/${id}`)
       loadTargets()
@@ -81,7 +81,7 @@ export default function TargetsPage() {
               value={newDomain}
               onChange={(e) => setNewDomain(e.target.value)}
               placeholder="example.com"
-              className="flex-1 px-4 py-2 rounded-md border border-input bg-background"
+              className="flex-1 px-4 py-2 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
               onKeyPress={(e) => e.key === 'Enter' && addTarget()}
             />
             <Button onClick={addTarget}>
@@ -106,26 +106,28 @@ export default function TargetsPage() {
               {targets.map((target) => (
                 <div
                   key={target.id}
-                  className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors"
+                  className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors"
                 >
-                  <div>
-                    <div className="font-medium">{target.domain}</div>
-                    {target.notes && (
-                      <div className="text-sm text-muted-foreground mt-1">
-                        {target.notes}
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="font-medium">{target.domain}</div>
+                      {target.notes && (
+                        <div className="text-sm text-muted-foreground mt-1">
+                          {target.notes}
+                        </div>
+                      )}
+                      <div className="text-xs text-muted-foreground mt-1">
+                        Added {new Date(target.created_at).toLocaleDateString()}
                       </div>
-                    )}
-                    <div className="text-xs text-muted-foreground mt-1">
-                      Added {new Date(target.created_at).toLocaleDateString()}
                     </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => deleteTarget(target.id)}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => deleteTarget(target.id)}
-                  >
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
                 </div>
               ))}
             </div>

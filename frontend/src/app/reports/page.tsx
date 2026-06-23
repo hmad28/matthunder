@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Download, FileText } from 'lucide-react'
-import { api } from '@/lib/api'
+import { publicApi, api } from '@/lib/api'
 
 interface Report {
   id: string
@@ -24,7 +24,7 @@ export default function ReportsPage() {
 
   const loadReports = async () => {
     try {
-      const response = await api.get('/api/v1/reports')
+      const response = await publicApi.get('/api/v1/reports')
       setReports(response.data)
     } catch (error) {
       console.error('Failed to load reports:', error)
@@ -84,27 +84,29 @@ export default function ReportsPage() {
               {reports.map((report) => (
                 <div
                   key={report.id}
-                  className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors"
+                  className="p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors"
                 >
-                  <div className="flex items-center gap-4">
-                    <FileText className="h-8 w-8 text-muted-foreground" />
-                    <div>
-                      <div className="font-medium">
-                        {report.report_type.toUpperCase()} Report
-                      </div>
-                      <div className="text-sm text-muted-foreground mt-1">
-                        Generated {new Date(report.generated_at).toLocaleString()}
-                        {report.file_size && ` • ${formatFileSize(report.file_size)}`}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <FileText className="h-8 w-8 text-muted-foreground" />
+                      <div>
+                        <div className="font-medium">
+                          {report.report_type.toUpperCase()} Report
+                        </div>
+                        <div className="text-sm text-muted-foreground mt-1">
+                          Generated {new Date(report.generated_at).toLocaleString()}
+                          {report.file_size && ` • ${formatFileSize(report.file_size)}`}
+                        </div>
                       </div>
                     </div>
+                    <button
+                      onClick={() => downloadReport(report.id)}
+                      className="px-4 py-2 rounded-md border border-border hover:bg-accent transition-colors"
+                    >
+                      <Download className="h-4 w-4 mr-2 inline" />
+                      Download
+                    </button>
                   </div>
-                  <button
-                    onClick={() => downloadReport(report.id)}
-                    className="px-4 py-2 rounded-md border border-border hover:bg-accent transition-colors"
-                  >
-                    <Download className="h-4 w-4 mr-2 inline" />
-                    Download
-                  </button>
                 </div>
               ))}
             </div>

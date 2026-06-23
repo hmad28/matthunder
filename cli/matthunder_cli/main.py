@@ -19,6 +19,9 @@ app = typer.Typer(
 
 console = Console()
 
+# Global JSON output flag
+JSON_OUTPUT = False
+
 # API configuration
 CONFIG_DIR = Path(os.getenv("MATTHUNDER_CONFIG_DIR", Path.home() / ".matthunder"))
 CONFIG_FILE = CONFIG_DIR / "config.json"
@@ -57,6 +60,14 @@ def get_client() -> httpx.Client:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     return httpx.Client(base_url=get_api_url(), headers=headers, timeout=30.0)
+
+
+def output_json(data: any) -> None:
+    """Output data as JSON if JSON_OUTPUT is enabled"""
+    if JSON_OUTPUT:
+        console.print_json(json.dumps(data, indent=2))
+        return True
+    return False
 
 
 @app.command()
@@ -385,6 +396,245 @@ def status():
         console.print(f"API URL: {get_api_url()}")
     except Exception as e:
         console.print(f"[red]✗[/red] API is not accessible: {e}")
+
+
+@app.command()
+def logs(
+    scan_id: str = typer.Argument(..., help="Scan ID to view logs for"),
+    limit: int = typer.Option(100, "--limit", "-l", help="Number of log entries to show"),
+    follow: bool = typer.Option(False, "--follow", "-f", help="Follow log output (not yet implemented)"),
+):
+    """View scan logs"""
+    client = get_client()
+    
+    try:
+        response = client.get(f"/api/v1/scans/{scan_id}/logs?limit={limit}")
+        response.raise_for_status()
+        logs = response.json()
+        
+        if output_json(logs):
+            return
+        
+        if not logs:
+            console.print("[yellow]No logs found for this scan[/yellow]")
+            return
+        
+        console.print(f"\n[bold]Scan Logs for {scan_id[:8]}...[/bold]\n")
+        
+        for log in logs:
+            level = log.get("level", "info").lower()
+            message = log.get("message", "")
+            timestamp = log.get("timestamp", "")[:19]
+            
+            level_colors = {
+                "info": "blue",
+                "warn": "yellow",
+                "warning": "yellow",
+                "error": "red",
+                "success": "green",
+            }
+            color = level_colors.get(level, "white")
+            
+            console.print(f"[dim]{timestamp}[/dim] [{color}]{level:8}[/{color}] {message}")
+        
+        console.print(f"\n[dim]Total: {len(logs)} log entries[/dim]")
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+
+
+@app.command()
+def cancel(
+    scan_id: str = typer.Argument(..., help="Scan ID to cancel"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+):
+    """Cancel a running scan"""
+    if not force:
+        confirm = typer.confirm(f"Are you sure you want to cancel scan {scan_id[:8]}...?")
+        if not confirm:
+            raise typer.Abort()
+    
+    client = get_client()
+    
+    try:
+        response = client.post(f"/api/v1/scans/{scan_id}/stop")
+        response.raise_for_status()
+        scan = response.json()
+        
+        if output_json(scan):
+            return
+        
+        console.print(f"[green]✓[/green] Scan cancelled successfully")
+        console.print(f"  Scan ID: {scan['id']}")
+        console.print(f"  Status: {scan['status']}")
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+
+
+@app.command()
+def reports(
+    scan_id: str = typer.Option(None, "--scan", "-s", help="Filter by scan ID"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Number of reports to show"),
+):
+    """List available reports"""
+    client = get_client()
+    
+    params = {"limit": limit}
+    if scan_id:
+        params["scan_id"] = scan_id
+    
+    try:
+        response = client.get("/api/v1/reports", params=params)
+        response.raise_for_status()
+        reports = response.json()
+        
+        if output_json(reports):
+            return
+        
+        if not reports:
+            console.print("[yellow]No reports found[/yellow]")
+            return
+        
+        table = Table(title="Available Reports")
+        table.add_column("ID", style="cyan")
+        table.add_column("Scan ID", style="blue")
+        table.add_column("Type", style="green")
+        table.add_column("Size", style="yellow")
+        table.add_column("Generated", style="magenta")
+        
+        for report in reports:
+            size = report.get("file_size", 0)
+            size_str = f"{size / 1024:.1f} KB" if size else "N/A"
+            
+            table.add_row(
+                str(report["id"])[:8] + "...",
+                str(report["scan_id"])[:8] + "...",
+                report.get("report_type", "N/A"),
+                size_str,
+                report.get("generated_at", "")[:16]
+            )
+        
+        console.print(table)
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+
+
+@app.command()
+def download_report(
+    report_id: str = typer.Argument(..., help="Report ID to download"),
+    output: str = typer.Option(None, "--output", "-o", help="Output file path"),
+):
+    """Download a report file"""
+    client = get_client()
+    
+    try:
+        # First get report metadata
+        response = client.get(f"/api/v1/reports/{report_id}")
+        response.raise_for_status()
+        report = response.json()
+        
+        if output_json(report):
+            return
+        
+        # Determine output filename
+        if not output:
+            file_path = report.get("file_path", "")
+            output = Path(file_path).name if file_path else f"report_{report_id}.pdf"
+        
+        # Download the report
+        response = client.get(f"/api/v1/reports/{report_id}/download")
+        response.raise_for_status()
+        
+        # Save to file
+        with open(output, "wb") as f:
+            f.write(response.content)
+        
+        console.print(f"[green]✓[/green] Report downloaded successfully")
+        console.print(f"  Report ID: {report_id}")
+        console.print(f"  Saved to: {output}")
+        console.print(f"  Size: {len(response.content) / 1024:.1f} KB")
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+
+
+@app.command()
+def approvals(
+    status_filter: str = typer.Option("pending", "--status", "-s", help="Filter by status: pending, approved, rejected"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Number of approvals to show"),
+):
+    """List approval requests"""
+    client = get_client()
+    
+    try:
+        response = client.get(f"/api/v1/approvals?status_filter={status_filter}&limit={limit}")
+        response.raise_for_status()
+        approvals = response.json()
+        
+        if output_json(approvals):
+            return
+        
+        if not approvals:
+            console.print(f"[yellow]No {status_filter} approval requests found[/yellow]")
+            return
+        
+        table = Table(title=f"Approval Requests ({status_filter})")
+        table.add_column("ID", style="cyan")
+        table.add_column("Type", style="green")
+        table.add_column("Status", style="yellow")
+        table.add_column("Requested", style="magenta")
+        table.add_column("Expires", style="blue")
+        
+        for approval in approvals:
+            status_color = {
+                "pending": "yellow",
+                "approved": "green",
+                "rejected": "red",
+                "expired": "dim",
+            }.get(approval["status"], "white")
+            
+            table.add_row(
+                str(approval["id"])[:8] + "...",
+                approval.get("request_type", "N/A"),
+                f"[{status_color}]{approval['status']}[/{status_color}]",
+                approval.get("requested_at", "")[:16],
+                approval.get("expires_at", "")[:16] if approval.get("expires_at") else "N/A"
+            )
+        
+        console.print(table)
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+
+
+@app.command()
+def review_approval(
+    approval_id: str = typer.Argument(..., help="Approval request ID"),
+    decision: str = typer.Argument(..., help="Decision: approve or reject"),
+    comment: str = typer.Option(None, "--comment", "-c", help="Review comment"),
+):
+    """Review an approval request"""
+    if decision not in ["approve", "reject"]:
+        console.print("[red]Error:[/red] Decision must be 'approve' or 'reject'")
+        raise typer.Exit(1)
+    
+    client = get_client()
+    
+    payload = {
+        "status": "approved" if decision == "approve" else "rejected",
+        "comment": comment,
+    }
+    
+    try:
+        response = client.post(f"/api/v1/approvals/{approval_id}/review", json=payload)
+        response.raise_for_status()
+        result = response.json()
+        
+        if output_json(result):
+            return
+        
+        console.print(f"[green]✓[/green] Approval {decision}d successfully")
+        console.print(f"  Approval ID: {approval_id}")
+        console.print(f"  Status: {result['status']}")
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
 
 
 if __name__ == "__main__":

@@ -181,32 +181,82 @@ async def get_scan_logs(
 @router.websocket("/{scan_id}/ws")
 async def scan_websocket(
     websocket: WebSocket,
-    scan_id: UUID
+    scan_id: UUID,
 ):
-    """WebSocket endpoint for real-time scan logs"""
-    await websocket.accept()
+    """WebSocket endpoint for real-time scan logs.
     
+    Authentication: pass token as query param ?token=<jwt>
+    The token must belong to a user who owns the scan.
+    """
+    from app.core.security import verify_token
+    from app.config import settings
+
+    # --- Authenticate via query-param token ---
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4401, reason="Authentication required")
+        return
+
+    user_id = verify_token(token)
+    if user_id is None:
+        await websocket.close(code=4401, reason="Invalid or expired token")
+        return
+
+    # --- Verify ownership of the scan ---
+    from app.database import async_session
+    from sqlalchemy import select
+
+    async with async_session() as db:
+        result = await db.execute(select(Scan).where(Scan.id == str(scan_id)))
+        scan = result.scalar_one_or_none()
+
+    if not scan:
+        await websocket.close(code=4404, reason="Scan not found")
+        return
+
+    if scan.created_by != user_id:
+        await websocket.close(code=4403, reason="Not authorized to access this scan")
+        return
+
+    # --- Origin check ---
+    origin = websocket.headers.get("origin", "")
+    allowed = settings.CORS_ORIGINS
+    if allowed and origin and origin not in allowed:
+        await websocket.close(code=4403, reason="Origin not allowed")
+        return
+
+    await websocket.accept()
+
     try:
-        # TODO: Implement proper authentication for WebSocket
-        # For now, just stream logs
-        
-        from app.database import async_session
         from redis import asyncio as aioredis
-        from app.config import settings
-        
+
+        if not settings.REDIS_URL:
+            await websocket.send_json({"type": "error", "data": {"message": "Redis not configured — real-time logs unavailable"}})
+            await websocket.close(code=1000)
+            return
+
         redis = aioredis.from_url(settings.REDIS_URL)
         pubsub = redis.pubsub()
         channel = f"scan:{scan_id}:logs"
         await pubsub.subscribe(channel)
-        
+
         try:
             async for message in pubsub.listen():
                 if message["type"] == "message":
-                    await websocket.send_json(message["data"])
+                    raw = message["data"]
+                    if isinstance(raw, bytes):
+                        raw = raw.decode()
+                    parts = raw.split("|", 1) if isinstance(raw, str) else [str(raw)]
+                    level = parts[0] if len(parts) > 1 else "info"
+                    text = parts[1] if len(parts) > 1 else parts[0]
+                    await websocket.send_json({
+                        "type": "log",
+                        "data": {"level": level, "message": text},
+                    })
         finally:
             await pubsub.unsubscribe(channel)
             await redis.close()
-            
+
     except WebSocketDisconnect:
         pass
     except Exception as e:
